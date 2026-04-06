@@ -1,0 +1,43 @@
+# Development overrides — applied automatically by docker compose up.
+# Adds hot-reload, exposes all ports, mounts source code.
+
+services:
+
+  django:
+    command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-prod}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - ./backend:/app          # live source mount — changes reflect immediately
+      - staticfiles:/app/staticfiles
+      - media:/app/media
+    ports:
+      - "8000:8000"
+
+  celery:
+    command: >
+      celery -A config.celery worker
+      --loglevel=debug
+      --concurrency=1
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-prod}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - ./backend:/app          # same source mount for task code hot-reload
+      - media:/app/media
+
+  db:
+    ports:
+      - "5432:5432"             # expose postgres for local DB clients
+
+  redis:
+    ports:
+      - "6379:6379"             # expose redis for local inspection
+
+  minio:
+    ports:
+      - "9000:9000"             # S3 API
+      - "9001:9001"             # MinIO web console

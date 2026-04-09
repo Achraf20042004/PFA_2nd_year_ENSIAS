@@ -14,7 +14,12 @@ DATABASES = {
         "OPTIONS": {},
         "TIME_ZONE": None,
         "TEST": {"NAME": ":memory:"},
-    }
+    },
+    "analytics": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": ":memory:",
+        "TEST": {"NAME": ":memory:"},
+    },
 }
 # Skip S3/MinIO during tests — use local filesystem
 DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"

@@ -16,6 +16,7 @@ urlpatterns = [
     path("api/results/", include("apps.results.urls_results")),
     path("api/badges/", include("apps.badges.urls")),
     path("api/courses/", include("apps.courses.urls")),
+    path("api/analytics/", include("apps.analytics.urls")),
 ]
 
 if settings.DEBUG:

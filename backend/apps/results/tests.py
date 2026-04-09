@@ -143,12 +143,46 @@ class TestSubmitAttemptScore:
         assert results[images[1].id].correct is False
 
     def test_reponse_modele_equals_ground_truth(self, db, student, exercise, images):
+        # In test env, ML inference is unavailable → fallback = ground-truth label
         answers = [{"image_id": images[0].id, "reponse_etudiant": "malade"}]
         attempt = submit_attempt(student, exercise, answers, 30, "practice")
         ir = attempt.image_results.get(image=images[0])
         assert ir.reponse_modele == images[0].label
 
+    def test_ml_prediction_equals_ground_truth_when_inference_unavailable(
+        self, db, student, exercise, images
+    ):
+        # Inference unavailable in tests → ml_prediction = ground-truth fallback
+        answers = [{"image_id": images[0].id, "reponse_etudiant": "malade"}]
+        attempt = submit_attempt(student, exercise, answers, 30, "practice")
+        ir = attempt.image_results.get(image=images[0])
+        assert ir.ml_prediction == images[0].label
+
+    def test_ml_confidence_none_when_inference_unavailable(
+        self, db, student, exercise, images
+    ):
+        # No transformers in test env → confidence stays null
+        answers = [{"image_id": images[0].id, "reponse_etudiant": "malade"}]
+        attempt = submit_attempt(student, exercise, answers, 30, "practice")
+        ir = attempt.image_results.get(image=images[0])
+        assert ir.ml_confidence is None
+
+    def test_ml_inference_wired_when_available(self, db, student, exercise, images, monkeypatch):
+        """When inference succeeds, reponse_modele / ml_prediction use the ML result."""
+        from unittest.mock import patch
+
+        fake_result = {"label": "sain", "confidence": 0.87, "raw_label": "NORMAL"}
+        with patch("apps.results.services._run_ml_inference", return_value=("sain", 0.87)):
+            answers = [{"image_id": images[0].id, "reponse_etudiant": "malade"}]
+            attempt = submit_attempt(student, exercise, answers, 30, "practice")
+
+        ir = attempt.image_results.get(image=images[0])
+        assert ir.ml_prediction == "sain"
+        assert ir.ml_confidence == pytest.approx(0.87)
+        assert ir.reponse_modele == "sain"
+
     def test_gradcam_path_null(self, db, student, exercise, images):
+        # gradcam is generated asynchronously; path starts null
         answers = [{"image_id": images[0].id, "reponse_etudiant": "malade"}]
         attempt = submit_attempt(student, exercise, answers, 30, "practice")
         assert attempt.image_results.first().gradcam_path is None
@@ -323,6 +357,40 @@ class TestFeedbackView:
         attempt = self._attempt(student, exercise, images, correct=False)
         resp = auth_client(student).get(self._url(attempt.pk))
         assert resp.json()["cours_recommande"] is None
+
+    def test_feedback_contains_ml_confidence_field(self, db, student, exercise, images):
+        attempt = self._attempt(student, exercise, images)
+        resp = auth_client(student).get(self._url(attempt.pk))
+        for ir_data in resp.json()["image_results"]:
+            assert "ml_confidence" in ir_data
+
+    def test_feedback_contains_ml_prediction_field(self, db, student, exercise, images):
+        attempt = self._attempt(student, exercise, images)
+        resp = auth_client(student).get(self._url(attempt.pk))
+        for ir_data in resp.json()["image_results"]:
+            assert "ml_prediction" in ir_data
+
+    def test_feedback_ml_confidence_null_when_inference_unavailable(
+        self, db, student, exercise, images
+    ):
+        # In test env, inference unavailable → confidence is null in response
+        attempt = self._attempt(student, exercise, images)
+        resp = auth_client(student).get(self._url(attempt.pk))
+        for ir_data in resp.json()["image_results"]:
+            assert ir_data["ml_confidence"] is None
+
+    def test_feedback_ml_confidence_value_when_inference_available(
+        self, db, student, exercise, images
+    ):
+        from unittest.mock import patch
+
+        with patch("apps.results.services._run_ml_inference", return_value=("malade", 0.93)):
+            attempt = self._attempt(student, exercise, images)
+
+        resp = auth_client(student).get(self._url(attempt.pk))
+        for ir_data in resp.json()["image_results"]:
+            assert ir_data["ml_confidence"] == pytest.approx(0.93)
+            assert ir_data["ml_prediction"] == "malade"
 
     def test_cours_recommande_returned_when_errors_and_course(self, db, student, exercise, images, prof):
         from django.core.files.uploadedfile import SimpleUploadedFile

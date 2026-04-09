@@ -3,10 +3,12 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# System deps for psycopg2-binary and Pillow
+# System deps for psycopg2-binary, Pillow, opencv-headless, and torch
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
         libpq-dev \
+        libgl1 \
+        libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -26,6 +28,8 @@ RUN groupadd --gid 1001 appgroup \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \
         postgresql-client \
+        libgl1 \
+        libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder
@@ -36,9 +40,9 @@ WORKDIR /app
 # Copy application code
 COPY --chown=appuser:appgroup . .
 
-# Writable dirs for staticfiles and media (overridden by volumes in compose)
-RUN mkdir -p /app/staticfiles /app/media \
- && chown -R appuser:appgroup /app/staticfiles /app/media
+# Writable dirs for staticfiles, media, analytics DB, and HF model cache
+RUN mkdir -p /app/staticfiles /app/media /app/ml_cache \
+ && chown -R appuser:appgroup /app/staticfiles /app/media /app/ml_cache
 
 # Make entrypoint executable
 RUN chmod +x /app/entrypoint.sh

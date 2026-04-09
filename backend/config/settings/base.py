@@ -47,6 +47,7 @@ LOCAL_APPS = [
     "apps.ai_models",
     "apps.results",
     "apps.badges",
+    "apps.analytics",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -92,8 +93,18 @@ DATABASES = {
         "PASSWORD": os.getenv("DB_PASSWORD", ""),
         "HOST": os.getenv("DB_HOST", "localhost"),
         "PORT": os.getenv("DB_PORT", "5432"),
-    }
+    },
+    # Analytical database — SQLite, separate from transactional PostgreSQL
+    "analytics": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / os.getenv("ANALYTICS_DB_NAME", "analytics.db"),
+    },
 }
+
+DATABASE_ROUTERS = ["apps.analytics.router.AnalyticsRouter"]
+
+# HuggingFace model cache directory (relative to backend root by default)
+ML_CACHE_DIR = os.getenv("ML_CACHE_DIR", str(BASE_DIR / "ml_cache"))
 
 # Custom user model
 AUTH_USER_MODEL = "accounts.User"

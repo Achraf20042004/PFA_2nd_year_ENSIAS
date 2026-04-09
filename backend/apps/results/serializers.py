@@ -38,12 +38,16 @@ class ImageResultFeedbackSerializer(serializers.ModelSerializer):
     image_id = serializers.IntegerField(source="image.id")
     chemin = serializers.CharField(source="image.chemin")
     label = serializers.CharField(source="image.label")  # ground truth revealed in feedback
+    ml_confidence = serializers.FloatField(allow_null=True)
+    ml_prediction = serializers.CharField(allow_null=True)
 
     class Meta:
         model = ImageResult
         fields = [
             "image_id", "chemin", "label",
-            "reponse_etudiant", "reponse_modele", "correct", "gradcam_path",
+            "reponse_etudiant", "reponse_modele",
+            "ml_prediction", "ml_confidence",
+            "correct", "gradcam_path",
         ]
 
 

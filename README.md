@@ -71,3 +71,87 @@ medtrain/
 | `POST /api/courses/upload/` | Upload course PDF / video |
 | `GET  /api/courses/` | List courses (filterable by `?maladie=`) |
 | `POST /api/datasets/upload/` | Upload image dataset (.zip) |
+| `GET  /api/analytics/etl-logs/` | ETL pipeline audit log (admin) |
+| `GET  /api/analytics/model-metrics/` | HuggingFace model performance (prof/admin) |
+| `GET  /api/analytics/dashboard/prof/` | Per-exercise KPIs + confidence trends |
+| `GET  /api/analytics/dashboard/admin/` | Global platform statistics |
+
+---
+
+## Performance tests (Locust)
+
+The `locustfile.py` at the project root runs three weighted scenarios against a
+live backend: student exercise sessions (60 %), professor dataset uploads (30 %),
+and admin analytics polling (10 %).
+
+**Target:** 50 concurrent users, p95 response time < 2 000 ms.
+
+### Prerequisites
+
+1. A running MedTrain backend (`docker compose up --build`)
+2. Locust installed (`pip install locust>=2.24.0`)
+3. Seed test users (run once):
+
+```bash
+cd backend
+python manage.py shell -c "
+from django.contrib.auth import get_user_model
+User = get_user_model()
+for email, role in [
+    ('student@medtrain.local', 'etudiant'),
+    ('prof@medtrain.local',    'prof'),
+    ('admin@medtrain.local',   'admin'),
+]:
+    if not User.objects.filter(email=email).exists():
+        u = User(email=email, username=email, role=role)
+        u.set_password('testpass123')
+        u.save()
+print('Seed users ready.')
+"
+```
+
+4. At least one active exercise with images (create via the admin panel or API).
+
+### Running Locust
+
+```bash
+# Interactive web UI — open http://localhost:8089 and set users/spawn-rate
+locust -f locustfile.py --host=http://localhost:8000
+
+# Headless (CI/CD) — staged ramp-up via MedTrainLoadShape, 5-minute run
+locust -f locustfile.py --host=http://localhost:8000 --headless
+
+# Simple constant load (overrides the built-in shape)
+locust -f locustfile.py --host=http://localhost:8000 \
+       --users=50 --spawn-rate=5 --run-time=3m --headless
+
+# Custom credentials
+export LOCUST_STUDENT_EMAIL=myuser@example.com
+export LOCUST_STUDENT_PASSWORD=mypassword
+locust -f locustfile.py --host=http://localhost:8000 --headless
+```
+
+### Load shape (default)
+
+| Phase | Duration | Users | Spawn rate |
+|---|---|---|---|
+| Ramp up (low) | 0 – 30 s | 0 → 10 | 2/s |
+| Ramp up (mid) | 30 – 90 s | 10 → 30 | 4/s |
+| Ramp up (full) | 90 – 150 s | 30 → 50 | 5/s |
+| Steady state | 150 – 270 s | 50 | — |
+| Cool down | 270 – 300 s | 50 → 0 | 10/s |
+
+### Interpreting results
+
+Key metrics to watch in the Locust report:
+
+| Metric | Target |
+|---|---|
+| p95 response time | < 2 000 ms |
+| Failure rate | < 1 % |
+| `/api/attempts/` p95 | < 3 000 ms (includes ML inference) |
+| `/api/datasets/upload/` p95 | < 5 000 ms (Celery async, returns immediately) |
+
+A high p95 on `/api/attempts/` indicates that the HuggingFace model is not
+cached and needs warm-up. Send a few requests before measuring steady-state
+performance.

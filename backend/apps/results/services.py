@@ -1,8 +1,11 @@
 """
 Business logic for the results app.
 """
+import logging
+
 from apps.results.models import Attempt, ImageResult
 
+logger = logging.getLogger(__name__)
 
 VALID_LABELS = {"malade", "sain"}
 
@@ -11,7 +14,48 @@ class SubmissionError(Exception):
     """Raised when a submitted answer payload is invalid."""
 
 
-def submit_attempt(student, exercise, answers: list[dict], duree_reelle: int, mode: str) -> Attempt:
+# ---------------------------------------------------------------------------
+# ML inference helper
+# ---------------------------------------------------------------------------
+
+
+def _run_ml_inference(maladie: str, image) -> tuple[str, float | None]:
+    """
+    Run HuggingFace inference for one image.
+
+    Returns (predicted_label, confidence).  Falls back to the ground-truth
+    label with confidence=None when inference is unavailable (transformers not
+    installed, storage unreachable, unknown disease adapter, etc.).
+    """
+    try:
+        from django.core.files.storage import default_storage
+        from ml.adapters import get_adapter
+        from ml.registry import predict
+
+        adapter = get_adapter(maladie)
+        with default_storage.open(image.chemin) as fh:
+            raw_bytes = fh.read()
+        pil_image = adapter.preprocess(raw_bytes)
+        result = predict(maladie, pil_image)
+        return result["label"], result["confidence"]
+
+    except Exception:
+        # Inference unavailable — keep behaviour identical to Phase 1.
+        logger.debug(
+            "ML inference unavailable for image %s (maladie=%s); using ground-truth fallback.",
+            image.id, maladie,
+        )
+        return image.label, None
+
+
+# ---------------------------------------------------------------------------
+# Attempt submission
+# ---------------------------------------------------------------------------
+
+
+def submit_attempt(
+    student, exercise, answers: list[dict], duree_reelle: int, mode: str
+) -> Attempt:
     """
     Validate and persist a student's attempt.
 
@@ -20,10 +64,12 @@ def submit_attempt(student, exercise, answers: list[dict], duree_reelle: int, mo
 
     Steps:
       1. Validate all images belong to exercise.dataset.
-      2. Compare student answer to ground-truth label → compute correct + score.
-      3. In Phase 1, reponse_modele = ground-truth label (placeholder for AI).
+      2. Run HuggingFace inference per image (falls back to ground truth if
+         inference is unavailable).
+      3. Compare student answer to ground-truth label → compute correct + score.
       4. Create Attempt + ImageResult records atomically.
-      5. Trigger badge evaluation.
+      5. Dispatch async Grad-CAM generation for each incorrect answer.
+      6. Trigger badge evaluation.
 
     Returns the saved Attempt instance.
     """
@@ -35,9 +81,7 @@ def submit_attempt(student, exercise, answers: list[dict], duree_reelle: int, mo
 
     # Fetch images in one query and index by id
     image_ids = [a["image_id"] for a in answers]
-    images_qs = Image.objects.filter(
-        id__in=image_ids, dataset=exercise.dataset
-    )
+    images_qs = Image.objects.filter(id__in=image_ids, dataset=exercise.dataset)
     images_by_id = {img.id: img for img in images_qs}
 
     image_results_to_create = []
@@ -58,6 +102,9 @@ def submit_attempt(student, exercise, answers: list[dict], duree_reelle: int, mo
                 f"Image {image_id} does not belong to this exercise's dataset."
             )
 
+        # Phase 2: run ML inference; falls back gracefully if unavailable
+        ml_pred, ml_conf = _run_ml_inference(exercise.maladie, image)
+
         is_correct = reponse_etudiant == image.label
         if is_correct:
             correct_count += 1
@@ -66,7 +113,9 @@ def submit_attempt(student, exercise, answers: list[dict], duree_reelle: int, mo
             ImageResult(
                 image=image,
                 reponse_etudiant=reponse_etudiant,
-                reponse_modele=image.label,   # Phase 1 placeholder; replaced by AI in Phase 2
+                reponse_modele=ml_pred,      # ML prediction (or ground-truth fallback)
+                ml_prediction=ml_pred,
+                ml_confidence=ml_conf,
                 correct=is_correct,
                 gradcam_path=None,
             )
@@ -86,6 +135,9 @@ def submit_attempt(student, exercise, answers: list[dict], duree_reelle: int, mo
         ir.attempt = attempt
     ImageResult.objects.bulk_create(image_results_to_create)
 
+    # Dispatch async Grad-CAM for each incorrect answer (fire-and-forget)
+    _dispatch_gradcam(attempt)
+
     # Trigger badge evaluation (fire-and-forget — does not affect the response)
     try:
         award_badges(student, attempt)
@@ -93,6 +145,25 @@ def submit_attempt(student, exercise, answers: list[dict], duree_reelle: int, mo
         pass  # badge failure must never break the submission
 
     return attempt
+
+
+def _dispatch_gradcam(attempt: Attempt) -> None:
+    """Enqueue Grad-CAM generation tasks for all incorrect ImageResults."""
+    try:
+        from tasks.training_tasks import generate_gradcam_task
+
+        wrong_ids = list(
+            attempt.image_results.filter(correct=False).values_list("id", flat=True)
+        )
+        for ir_id in wrong_ids:
+            generate_gradcam_task.delay(ir_id)
+    except Exception:
+        logger.debug("Grad-CAM dispatch skipped (task system unavailable).")
+
+
+# ---------------------------------------------------------------------------
+# Exercise stats (professor dashboard)
+# ---------------------------------------------------------------------------
 
 
 def get_exercise_stats(exercise) -> dict:

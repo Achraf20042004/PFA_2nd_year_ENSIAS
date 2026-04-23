@@ -1,6 +1,7 @@
 """
 Views for the datasets app.
 """
+from django.db import transaction
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
@@ -43,9 +44,10 @@ class DatasetUploadView(APIView):
         )
         dataset.save()
 
-        # Dispatch Celery task — returns immediately in production
+        # Delay task dispatch until after the transaction commits so the worker
+        # sees the new row when it queries the database.
         from tasks.training_tasks import process_dataset_zip
-        process_dataset_zip.delay(dataset.id)
+        transaction.on_commit(lambda: process_dataset_zip.delay(dataset.id))
 
         return Response(
             DatasetSerializer(dataset).data,

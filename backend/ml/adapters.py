@@ -8,7 +8,7 @@ normalisation for each domain's specific requirements.
 Domain → Adapter mapping:
   pneumonie     → ChestAdapter   (256×256, grayscale input → RGB)
   melanome      → SkinAdapter    (224×224, RGB)
-  retinopathie  → FundusAdapter  (299×299, RGB)
+  retinopathie  → FundusAdapter  (256×256, RGB)  [placeholder: reuses pneumonia model]
 """
 import io
 import logging
@@ -47,7 +47,7 @@ class SkinAdapter(BaseAdapter):
     """
     Skin lesion adapter for melanoma detection.
 
-    Model: anonymous-german-shepherd/skin-cancer
+    Model: SeyedAli/Melanoma-Classification
     Size : 224×224
     Mode : RGB
     """
@@ -63,12 +63,11 @@ class FundusAdapter(BaseAdapter):
     """
     Fundus / retinal adapter for diabetic retinopathy detection.
 
-    Model: HuggingFace equivalent (see registry.py HUGGINGFACE_MODELS)
-    Size : 299×299
-    Mode : RGB
+    Placeholder model: nickmuchi/vit-finetuned-chest-xray-pneumonia (256×256).
+    Size matches ChestAdapter so the already-cached model is reused end-to-end.
     """
 
-    SIZE = (299, 299)
+    SIZE = (256, 256)
 
     def preprocess(self, image_bytes: bytes) -> Image.Image:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")

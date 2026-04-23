@@ -121,12 +121,20 @@ class ExerciseStartView(APIView):
             duree_minutes = 60
 
         images = get_exercise_images(request.user, exercise, n=nb_images)
+
+        from django.conf import settings
+        bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", "medtrain")
+        public_base = f"{settings.MINIO_PUBLIC_URL}/{bucket}"
+
         payload = {
             "exercise_id": exercise.id,
             "mode": mode,
             "duree_minutes": duree_minutes,
             "nb_images": len(images),
-            "images": [{"id": img.id, "chemin": img.chemin} for img in images],
+            "images": [
+                {"id": img.id, "chemin": img.chemin, "url": f"{public_base}/{img.chemin}"}
+                for img in images
+            ],
         }
         return Response(ExerciseSessionSerializer(payload).data)
 

@@ -82,6 +82,15 @@ const useAuthStore = create(
         refreshToken: state.refreshToken,
         user: state.user,
       }),
+      // Re-populate the plain localStorage keys that client.js reads on every
+      // request.  Without this, after a page reload the Zustand store is
+      // rehydrated from 'medtrain-auth' but access_token / refresh_token are
+      // stale or missing, so the Axios interceptor can never refresh and every
+      // API call returns 401.
+      onRehydrateStorage: () => (state) => {
+        if (state?.accessToken) localStorage.setItem('access_token', state.accessToken)
+        if (state?.refreshToken) localStorage.setItem('refresh_token', state.refreshToken)
+      },
     }
   )
 )

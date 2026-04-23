@@ -20,7 +20,6 @@ from rest_framework.test import APIClient
 from apps.accounts.services import generate_jwt_for_user
 from apps.datasets.models import Dataset, Image
 from apps.datasets.services import (
-    MIN_IMAGES_PER_LABEL,
     DatasetValidationError,
     validate_and_extract_zip,
 )
@@ -33,7 +32,7 @@ UPLOAD_URL = "/api/datasets/upload/"
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_zip(malade_count=MIN_IMAGES_PER_LABEL, sain_count=MIN_IMAGES_PER_LABEL,
+def make_zip(malade_count=5, sain_count=5,
              extra_files=None, bad_extension_in=None):
     buf = io.BytesIO()
     fake_jpg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
@@ -123,7 +122,7 @@ def dataset(db, prof):
         maladie="Pneumonie",
         fichier_zip=make_upload_file(make_zip()),
         statut=Dataset.Statut.READY,
-        nb_images=20,
+        nb_images=10,
     )
 
 
@@ -141,16 +140,12 @@ class TestValidateAndExtractZip:
 
     def test_valid_zip_returns_image_records(self, prof):
         records = validate_and_extract_zip(self._ds(prof), make_zip())
-        assert len(records) == MIN_IMAGES_PER_LABEL * 2
+        assert len(records) == 10  # 5 malade + 5 sain
         assert {r.label for r in records} == {"malade", "sain"}
 
-    def test_too_few_malade_raises(self, prof):
-        with pytest.raises(DatasetValidationError, match="malade"):
-            validate_and_extract_zip(self._ds(prof), make_zip(malade_count=2))
-
-    def test_too_few_sain_raises(self, prof):
-        with pytest.raises(DatasetValidationError, match="sain"):
-            validate_and_extract_zip(self._ds(prof), make_zip(sain_count=3))
+    def test_small_zip_accepted(self, prof):
+        records = validate_and_extract_zip(self._ds(prof), make_zip(malade_count=1, sain_count=1))
+        assert len(records) == 2
 
     def test_invalid_extension_raises(self, prof):
         with pytest.raises(DatasetValidationError, match="Invalid file type"):
@@ -173,11 +168,11 @@ class TestValidateAndExtractZip:
     def test_png_files_accepted(self, prof):
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
-            for i in range(MIN_IMAGES_PER_LABEL):
+            for i in range(5):
                 zf.writestr(f"malade/img_{i}.png", b"\x89PNG\r\n")
                 zf.writestr(f"sain/img_{i}.png", b"\x89PNG\r\n")
         records = validate_and_extract_zip(self._ds(prof), buf.getvalue())
-        assert len(records) == MIN_IMAGES_PER_LABEL * 2
+        assert len(records) == 10
 
 
 # ---------------------------------------------------------------------------
@@ -199,15 +194,23 @@ class TestProcessDatasetZipTask:
         process_dataset_zip.delay(dataset.id)
         dataset.refresh_from_db()
         assert dataset.statut == Dataset.Statut.READY
-        assert dataset.nb_images == MIN_IMAGES_PER_LABEL * 2
+        assert dataset.nb_images == 10  # 5 malade + 5 sain
         assert dataset.error_message == ""
 
     def test_valid_zip_creates_image_records(self, prof):
         from tasks.training_tasks import process_dataset_zip
         dataset = self._ds(prof)
         process_dataset_zip.delay(dataset.id)
-        assert Image.objects.filter(dataset=dataset, label="malade").count() == MIN_IMAGES_PER_LABEL
-        assert Image.objects.filter(dataset=dataset, label="sain").count() == MIN_IMAGES_PER_LABEL
+        assert Image.objects.filter(dataset=dataset, label="malade").count() == 5
+        assert Image.objects.filter(dataset=dataset, label="sain").count() == 5
+
+    def test_small_zip_sets_ready(self, prof):
+        from tasks.training_tasks import process_dataset_zip
+        dataset = self._ds(prof, make_zip(malade_count=1, sain_count=1))
+        process_dataset_zip.delay(dataset.id)
+        dataset.refresh_from_db()
+        assert dataset.statut == Dataset.Statut.READY
+        assert dataset.nb_images == 2
 
     def test_invalid_extension_sets_error(self, prof):
         from tasks.training_tasks import process_dataset_zip
@@ -216,14 +219,6 @@ class TestProcessDatasetZipTask:
         dataset.refresh_from_db()
         assert dataset.statut == Dataset.Statut.ERROR
         assert "Invalid file type" in dataset.error_message
-
-    def test_too_few_images_sets_error(self, prof):
-        from tasks.training_tasks import process_dataset_zip
-        dataset = self._ds(prof, make_zip(malade_count=1))
-        process_dataset_zip.delay(dataset.id)
-        dataset.refresh_from_db()
-        assert dataset.statut == Dataset.Statut.ERROR
-        assert "malade" in dataset.error_message
 
     def test_corrupt_zip_sets_error(self, prof):
         from tasks.training_tasks import process_dataset_zip
@@ -264,7 +259,10 @@ class TestDatasetUploadView:
         )
         assert Dataset.objects.filter(prof=prof, maladie="Tuberculose").exists()
 
+    @pytest.mark.django_db(transaction=True)
     def test_task_runs_eagerly_and_dataset_is_ready(self, prof_client, prof):
+        # transaction=True required: on_commit() only fires on a real commit,
+        # not inside pytest-django's default rollback-wrapped test transaction.
         prof_client.post(
             UPLOAD_URL,
             {"maladie": "Pneumonie", "fichier_zip": make_upload_file(make_zip())},
@@ -328,7 +326,7 @@ class TestDatasetStatusView:
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert data["statut"] == Dataset.Statut.READY
-        assert data["nb_images"] == 20
+        assert data["nb_images"] == 10
 
     def test_error_message_exposed(self, prof_client, prof):
         ds = Dataset.objects.create(

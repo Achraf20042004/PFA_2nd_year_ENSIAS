@@ -40,9 +40,12 @@ WORKDIR /app
 # Copy application code
 COPY --chown=appuser:appgroup . .
 
-# Writable dirs for staticfiles, media, analytics DB, and HF model cache
-RUN mkdir -p /app/staticfiles /app/media /app/ml_cache \
- && chown -R appuser:appgroup /app/staticfiles /app/media /app/ml_cache
+# Writable dirs for staticfiles, media, analytics DB, and HF model cache.
+# Pre-create analytics.db so the named volume is initialised with the file
+# already owned by appuser — avoids "unable to open database file" on first run.
+RUN mkdir -p /app/staticfiles /app/media /app/ml_cache /app/analytics_db \
+ && touch /app/analytics_db/analytics.db \
+ && chown -R appuser:appgroup /app/staticfiles /app/media /app/ml_cache /app/analytics_db
 
 # Make entrypoint executable
 RUN chmod +x /app/entrypoint.sh

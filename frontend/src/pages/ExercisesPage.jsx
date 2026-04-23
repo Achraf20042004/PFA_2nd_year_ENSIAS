@@ -9,7 +9,6 @@ const DOMAINS = [
   { value: '', label: 'Tous' },
   { value: 'pneumonie', label: 'Radiologie', sub: 'Pneumonie', color: 'text-blue-600', bg: 'bg-blue-50', dot: 'bg-blue-500' },
   { value: 'melanome', label: 'Dermatologie', sub: 'Mélanome', color: 'text-orange-600', bg: 'bg-orange-50', dot: 'bg-orange-500' },
-  { value: 'retinopathie', label: 'Ophtalmologie', sub: 'Rétinopathie', color: 'text-violet-600', bg: 'bg-violet-50', dot: 'bg-violet-500' },
 ]
 
 const DIFFICULTIES = [
@@ -28,7 +27,6 @@ const DIFFICULTY_STYLE = {
 const DOMAIN_META = {
   pneumonie: { color: 'text-blue-600', bg: 'bg-blue-50', dot: 'bg-blue-500', label: 'Radiologie' },
   melanome: { color: 'text-orange-600', bg: 'bg-orange-50', dot: 'bg-orange-500', label: 'Dermatologie' },
-  retinopathie: { color: 'text-violet-600', bg: 'bg-violet-50', dot: 'bg-violet-500', label: 'Ophtalmologie' },
 }
 
 function ExerciseCard({ exercise }) {
@@ -121,7 +119,9 @@ export default function ExercisesPage() {
     queryFn: () => exercisesApi.list(),
   })
 
-  const allExercises = data?.results ?? data ?? []
+  const allExercises = (data?.results ?? data ?? []).filter(
+    (ex) => ex.maladie !== 'retinopathie'
+  )
 
   const filtered = allExercises.filter((ex) => {
     if (selectedDomain && ex.maladie !== selectedDomain) return false

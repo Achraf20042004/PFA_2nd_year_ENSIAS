@@ -1,35 +1,49 @@
 """
 Dataset extraction and validation services.
 
-Expected zip structure:
-    malade/
-        image1.jpg
-        image2.png
-        ...
-    sain/
-        image1.jpg
-        ...
+Accepted zip structures (both work):
+
+    Flat:
+        malade/image1.jpg
+        sain/image1.jpg
+
+    Wrapped (root folder ignored):
+        dataset_radiologie/malade/image1.jpg
+        dataset_radiologie/sain/image1.jpg
 
 Rules:
 - Only .jpg / .jpeg / .png files are accepted.
-- Each label directory must contain at least MIN_IMAGES_PER_LABEL images.
-- Files outside malade/ or sain/ top-level directories are ignored.
+- The first path component named 'malade' or 'sain' (case-insensitive) sets
+  the label; any wrapper folders above it are ignored.
 - macOS __MACOSX metadata entries are silently skipped.
+
+validate_and_extract_zip() is pure validation — no storage side effects.
+Actual MinIO uploads are handled by the LOAD step in tasks/training_tasks.py.
 """
 import io
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
-
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
-MIN_IMAGES_PER_LABEL = 10
 LABELS = {"malade", "sain"}
 
 
 class DatasetValidationError(Exception):
     """Raised when the uploaded zip does not meet validation requirements."""
+
+
+@dataclass
+class RawImage:
+    """Validated image extracted from a zip — not yet persisted to storage."""
+    label: str
+    filename: str
+    data: bytes
+
+    @property
+    def chemin(self) -> str:
+        """Logical path used in validation assertions (label/filename)."""
+        return f"{self.label}/{self.filename}"
 
 
 def _is_skippable(name: str) -> bool:
@@ -46,26 +60,28 @@ def _classify_member(name: str) -> tuple[str | None, str]:
     """
     Return (label, filename) if the zip member belongs to a label directory,
     or (None, filename) if it should be ignored.
+
+    Scans every path component (not just the top-level one) so that ZIPs with
+    a root wrapper folder — e.g. dataset_radiologie/malade/img.jpg — are
+    handled the same as flat ZIPs — e.g. malade/img.jpg.
     """
     parts = Path(name).parts
-    if len(parts) < 2:
-        return None, Path(name).name
-    top_dir = parts[0].lower()
     filename = parts[-1]
-    if top_dir in LABELS:
-        return top_dir, filename
+    for part in parts[:-1]:
+        if part.lower() in LABELS:
+            return part.lower(), filename
     return None, filename
 
 
-def validate_and_extract_zip(dataset, zip_bytes: bytes) -> list:
+def validate_and_extract_zip(dataset, zip_bytes: bytes) -> list[RawImage]:
     """
-    Parse zip_bytes, validate contents, upload individual images to storage,
-    and return a list of unsaved Image model instances.
+    Parse zip_bytes, validate contents, and return a list of RawImage
+    instances ready to be uploaded and persisted by the ETL LOAD step.
+
+    No files are written to storage here — this function is pure validation.
 
     Raises DatasetValidationError if validation fails.
     """
-    from apps.datasets.models import Image
-
     try:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
     except zipfile.BadZipFile:
@@ -95,28 +111,13 @@ def validate_and_extract_zip(dataset, zip_bytes: bytes) -> list:
             buckets[label].append(name)
 
         # ------------------------------------------------------------------ #
-        # Pass 2 — enforce minimum image counts
+        # Pass 2 — read raw bytes and build RawImage records (no uploads)
         # ------------------------------------------------------------------ #
-        for label in LABELS:
-            count = len(buckets[label])
-            if count < MIN_IMAGES_PER_LABEL:
-                raise DatasetValidationError(
-                    f"Not enough '{label}' images: found {count}, "
-                    f"minimum required is {MIN_IMAGES_PER_LABEL}."
-                )
-
-        # ------------------------------------------------------------------ #
-        # Pass 3 — upload images and build Image records
-        # ------------------------------------------------------------------ #
-        image_records = []
+        raw_images: list[RawImage] = []
         for label, members in buckets.items():
             for name in members:
                 data = zf.read(name)
                 filename = Path(name).name
-                dest = f"datasets/{dataset.id}/images/{label}/{filename}"
-                saved_path = default_storage.save(dest, ContentFile(data))
-                image_records.append(
-                    Image(dataset=dataset, chemin=saved_path, label=label)
-                )
+                raw_images.append(RawImage(label=label, filename=filename, data=data))
 
-    return image_records
+    return raw_images

@@ -10,13 +10,11 @@ import { IconBook, IconChart } from '../../components/icons'
 const MALADIE_OPTIONS = [
   { value: 'pneumonie', label: 'Radiologie — Pneumonie' },
   { value: 'melanome', label: 'Dermatologie — Mélanome' },
-  { value: 'retinopathie', label: 'Ophtalmologie — Rétinopathie' },
 ]
 const DIFFICULTY_OPTIONS = ['facile', 'moyen', 'difficile']
 const DOMAIN_BADGE = {
   pneumonie: 'bg-blue-50 text-blue-700',
   melanome: 'bg-orange-50 text-orange-700',
-  retinopathie: 'bg-violet-50 text-violet-700',
 }
 
 const EMPTY_FORM = {
@@ -65,7 +63,7 @@ function Select({ className = '', children, ...props }) {
   )
 }
 
-function ExerciseForm({ form, onChange, datasets }) {
+function ExerciseForm({ form, onChange, datasets, datasetsLoading }) {
   function set(field, value) {
     onChange({ ...form, [field]: value })
   }
@@ -97,15 +95,21 @@ function ExerciseForm({ form, onChange, datasets }) {
       </div>
 
       <Field label="Dataset d'images" hint="Le dataset doit être préalablement uploadé et prêt.">
-        <Select value={form.dataset} onChange={(e) => set('dataset', e.target.value)}>
-          <option value="">— Sélectionner un dataset —</option>
-          {(datasets?.results ?? datasets ?? [])
-            .filter((d) => d.statut === 'ready' || !d.statut)
-            .map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.maladie} · Dataset #{d.id} ({d.statut ?? 'prêt'})
-              </option>
-            ))}
+        <Select value={form.dataset} onChange={(e) => set('dataset', e.target.value)} disabled={datasetsLoading}>
+          {datasetsLoading ? (
+            <option value="">Chargement des datasets…</option>
+          ) : (
+            <>
+              <option value="">— Sélectionner un dataset —</option>
+              {(datasets?.results ?? datasets ?? [])
+                .filter((d) => d.statut === 'ready')
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.maladie} · Dataset #{d.id} · {d.nb_images} images
+                  </option>
+                ))}
+            </>
+          )}
         </Select>
       </Field>
 
@@ -184,9 +188,10 @@ export default function MyExercisesPage() {
     queryFn: () => exercisesApi.list(),
   })
 
-  const { data: datasetsData } = useQuery({
+  const { data: datasetsData, isLoading: datasetsLoading } = useQuery({
     queryKey: ['datasets'],
     queryFn: () => datasetsApi.list(),
+    staleTime: 0, // always fetch fresh — never show a stale empty-dataset cache
   })
 
   const exercises = exercisesData?.results ?? exercisesData ?? []
@@ -348,7 +353,7 @@ export default function MyExercisesPage() {
         title={modal === 'create' ? 'Créer un exercice' : 'Modifier l\'exercice'}
         width="max-w-2xl"
       >
-        <ExerciseForm form={form} onChange={setForm} datasets={datasetsData} />
+        <ExerciseForm form={form} onChange={setForm} datasets={datasetsData} datasetsLoading={datasetsLoading} />
 
         {formError && (
           <div className="mt-4 bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-700">

@@ -37,6 +37,9 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -55,7 +58,7 @@ services:
       /bin/sh -c "
         mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin};
         mc mb --ignore-existing local/${MINIO_BUCKET:-medtrain};
-        mc anonymous set private local/${MINIO_BUCKET:-medtrain};
+        mc anonymous set download local/${MINIO_BUCKET:-medtrain};
         exit 0;
       "
     restart: "no"
@@ -79,6 +82,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: ${STORAGE_BACKEND:-minio}
       MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_URL: http://localhost:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BUCKET: ${MINIO_BUCKET:-medtrain}
@@ -99,9 +103,12 @@ services:
       EMAIL_PORT: ${EMAIL_PORT:-587}
       EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
       EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      ANALYTICS_DB_NAME: analytics_db/analytics.db
     volumes:
       - staticfiles:/app/staticfiles
       - media:/app/media
+      - ml_cache:/app/ml_cache
+      - analytics_db:/app/analytics_db
     depends_on:
       db:
         condition: service_healthy
@@ -142,8 +149,11 @@ services:
       AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://localhost:5000}
       MODEL_ACCURACY_THRESHOLD: ${MODEL_ACCURACY_THRESHOLD:-0.80}
+      ANALYTICS_DB_NAME: analytics_db/analytics.db
     volumes:
       - media:/app/media
+      - ml_cache:/app/ml_cache
+      - analytics_db:/app/analytics_db
     depends_on:
       db:
         condition: service_healthy
@@ -156,3 +166,5 @@ volumes:
   minio_data:
   staticfiles:
   media:
+  ml_cache:
+  analytics_db:

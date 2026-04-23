@@ -71,6 +71,9 @@ client.interceptors.response.use(
       processQueue(refreshError, null)
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
+      // Also clear the Zustand persist store so that on the next page load
+      // the stale token is not restored and the redirect loop cannot restart.
+      localStorage.removeItem('medtrain-auth')
       window.location.href = '/login'
       return Promise.reject(refreshError)
     } finally {

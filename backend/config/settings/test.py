@@ -21,8 +21,19 @@ DATABASES = {
         "TEST": {"NAME": ":memory:"},
     },
 }
+# No real MinIO in tests — boto3 path is skipped when MINIO_ENDPOINT is empty
+MINIO_ENDPOINT = ""
+
 # Skip S3/MinIO during tests — use local filesystem
-DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": "/tmp/medtrain_test_media"},
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 MEDIA_ROOT = "/tmp/medtrain_test_media"
 CORS_ALLOW_ALL_ORIGINS = True
 

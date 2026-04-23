@@ -1,9 +1,11 @@
 """
 Celery tasks for dataset processing and AI model inference setup.
 """
+import io
 import logging
 import time
 import uuid
+from pathlib import Path
 
 from config.celery import app
 
@@ -34,13 +36,12 @@ def process_dataset_zip(self, dataset_id: int):
     Process an uploaded dataset zip file:
       1. Mark dataset as PROCESSING.
       2. Read zip from storage, validate structure and file types.
-      3. Extract and upload individual images to storage.
-      4. Preprocess a sample image through the domain adapter (smoke-test).
-      5. Create Image records in the database.
-      6. Mark dataset as READY (or ERROR on failure).
-      7. Log each ETL step to the analytics SQLite database.
-
-    Triggered immediately after a successful upload.
+      3. Smoke-test the domain adapter on a sample image (in-memory).
+      4. Upload original images to MinIO: datasets/{id}/images/{label}/{file}
+         Upload preprocessed images to MinIO: datasets/{id}/preprocessed/{file}
+         Create Image records with the saved MinIO paths.
+      5. Mark dataset as READY (or ERROR on failure).
+      6. Log each ETL step to the analytics SQLite database.
     """
     from apps.datasets.models import Dataset, Image
     from apps.datasets.services import DatasetValidationError, validate_and_extract_zip
@@ -79,12 +80,12 @@ def process_dataset_zip(self, dataset_id: int):
              message=f"{len(zip_bytes)} bytes read", duration_ms=duration)
 
     # ------------------------------------------------------------------ #
-    # Step: validate
+    # Step: validate — pure in-memory; no storage writes
     # ------------------------------------------------------------------ #
     _log_etl(run_id, dataset_id, "validate", "started")
     t0 = time.monotonic()
     try:
-        image_records = validate_and_extract_zip(dataset, zip_bytes)
+        raw_items = validate_and_extract_zip(dataset, zip_bytes)
     except DatasetValidationError as exc:
         duration = int((time.monotonic() - t0) * 1000)
         _log_etl(run_id, dataset_id, "validate", "error",
@@ -104,44 +105,173 @@ def process_dataset_zip(self, dataset_id: int):
         dataset.save(update_fields=["statut", "error_message"])
         raise self.retry(exc=exc)
 
+    malade_count = sum(1 for r in raw_items if r.label == "malade")
+    sain_count = sum(1 for r in raw_items if r.label == "sain")
     duration = int((time.monotonic() - t0) * 1000)
     _log_etl(run_id, dataset_id, "validate", "success",
-             message=f"{len(image_records)} images validated", duration_ms=duration)
+             message=f"{len(raw_items)} images validated "
+                     f"(malade={malade_count}, sain={sain_count})",
+             duration_ms=duration)
+    logger.info(
+        "Dataset %s validated: %d total images — malade=%d, sain=%d.",
+        dataset_id, len(raw_items), malade_count, sain_count,
+    )
 
     # ------------------------------------------------------------------ #
-    # Step: transform  (adapter smoke-test — verify domain adapter exists)
+    # Step: transform — smoke-test the adapter on a sample image in-memory.
+    # Uses raw bytes directly (no storage reads) since files aren't uploaded yet.
     # ------------------------------------------------------------------ #
     _log_etl(run_id, dataset_id, "transform", "started")
     t0 = time.monotonic()
-    try:
-        from ml.adapters import get_adapter
-        adapter = get_adapter(dataset.maladie)
-        duration = int((time.monotonic() - t0) * 1000)
-        _log_etl(run_id, dataset_id, "transform", "success",
-                 message=f"Adapter {adapter.__class__.__name__} ready",
-                 duration_ms=duration)
-        logger.info("Domain adapter for '%s': %s", dataset.maladie, adapter.__class__.__name__)
-    except ValueError as exc:
-        duration = int((time.monotonic() - t0) * 1000)
-        # Unknown disease — not fatal; log a warning and continue
-        _log_etl(run_id, dataset_id, "transform", "error",
-                 message=str(exc), duration_ms=duration)
-        logger.warning("No adapter for disease '%s': %s", dataset.maladie, exc)
+    if not raw_items:
+        _log_etl(run_id, dataset_id, "transform", "skipped",
+                 message="No images extracted — skipping adapter smoke-test.",
+                 duration_ms=int((time.monotonic() - t0) * 1000))
+        logger.warning("Dataset %s: 0 images extracted; skipping transform smoke-test.", dataset_id)
+    else:
+        try:
+            from ml.adapters import get_adapter
+
+            adapter = get_adapter(dataset.maladie)
+            sample_bytes = raw_items[0].data
+            preprocessed = adapter.preprocess(sample_bytes)
+
+            duration = int((time.monotonic() - t0) * 1000)
+            _log_etl(
+                run_id, dataset_id, "transform", "success",
+                message=(
+                    f"{adapter.__class__.__name__}: "
+                    f"{preprocessed.size[0]}x{preprocessed.size[1]} {preprocessed.mode}; "
+                    f"{len(raw_items)} images ready for inference"
+                ),
+                duration_ms=duration,
+            )
+            logger.info(
+                "Transform smoke-test passed for '%s': %s -> %s %s.",
+                dataset.maladie, adapter.__class__.__name__, preprocessed.size, preprocessed.mode,
+            )
+        except ValueError as exc:
+            duration = int((time.monotonic() - t0) * 1000)
+            _log_etl(run_id, dataset_id, "transform", "error",
+                     message=str(exc), duration_ms=duration)
+            logger.warning("No adapter for disease '%s': %s", dataset.maladie, exc)
+        except Exception as exc:
+            duration = int((time.monotonic() - t0) * 1000)
+            _log_etl(run_id, dataset_id, "transform", "error",
+                     message=f"Adapter smoke-test failed: {exc}", duration_ms=duration)
+            logger.warning("Transform smoke-test failed for dataset %s: %s", dataset_id, exc)
+            # Non-fatal — dataset proceeds to load step
 
     # ------------------------------------------------------------------ #
-    # Step: load
+    # Step: load — upload to MinIO via boto3 then persist Image records
     # ------------------------------------------------------------------ #
     _log_etl(run_id, dataset_id, "load", "started")
     t0 = time.monotonic()
     try:
+        import boto3
+        from botocore.client import Config as BotocoreConfig
+        from django.conf import settings
+
+        from apps.datasets.models import Image
+        from ml.adapters import get_adapter
+
+        # When MINIO_ENDPOINT is empty (test environment) fall back to
+        # default_storage so tests don't need a live MinIO.
+        use_minio = bool(settings.MINIO_ENDPOINT)
+
+        if use_minio:
+            s3 = boto3.client(
+                "s3",
+                endpoint_url=f"http://{settings.MINIO_ENDPOINT}",
+                aws_access_key_id=settings.MINIO_ACCESS_KEY,
+                aws_secret_access_key=settings.MINIO_SECRET_KEY,
+                config=BotocoreConfig(signature_version="s3v4"),
+                verify=False,
+            )
+            bucket = settings.MINIO_BUCKET
+        else:
+            from django.core.files.base import ContentFile
+            from django.core.files.storage import default_storage
+
+        # Resolve adapter once; None means preprocessed uploads are skipped
+        try:
+            adapter = get_adapter(dataset.maladie)
+        except ValueError:
+            adapter = None
+            logger.warning(
+                "No adapter for disease '%s' — skipping preprocessed uploads.",
+                dataset.maladie,
+            )
+
+        image_records: list[Image] = []
+        upload_errors = 0
+
+        for item in raw_items:
+            label = item.label
+            filename = item.filename
+            raw_bytes = item.data
+            ext = Path(filename).suffix.lower()
+
+            # 1. Upload original image
+            orig_key = f"datasets/{dataset_id}/images/{label}/{filename}"
+            try:
+                if use_minio:
+                    s3.upload_fileobj(
+                        io.BytesIO(raw_bytes),
+                        bucket,
+                        orig_key,
+                        ExtraArgs={"ACL": "public-read"},
+                    )
+                else:
+                    default_storage.save(orig_key, ContentFile(raw_bytes))
+            except Exception as exc:
+                upload_errors += 1
+                logger.error("Failed to upload %s: %s", orig_key, exc)
+                continue  # skip this image, do not add a DB record
+
+            # 2. Upload preprocessed image (non-fatal)
+            if adapter is not None:
+                try:
+                    pil_img = adapter.preprocess(raw_bytes)
+                    buf = io.BytesIO()
+                    fmt = "JPEG" if ext in (".jpg", ".jpeg") else "PNG"
+                    pil_img.save(buf, format=fmt)
+                    buf.seek(0)
+                    pre_key = f"datasets/{dataset_id}/preprocessed/{filename}"
+                    if use_minio:
+                        s3.upload_fileobj(
+                            buf,
+                            bucket,
+                            pre_key,
+                            ExtraArgs={"ACL": "public-read"},
+                        )
+                    else:
+                        default_storage.save(pre_key, ContentFile(buf.getvalue()))
+                except Exception as exc:
+                    logger.warning(
+                        "Preprocessed upload skipped for %s: %s", filename, exc
+                    )
+
+            # 3. Record the MinIO key as the canonical path
+            image_records.append(
+                Image(dataset=dataset, chemin=orig_key, label=label)
+            )
+
+        if not image_records:
+            raise RuntimeError(
+                f"No images were uploaded — {upload_errors} upload error(s). "
+                "Check Celery logs for details."
+            )
+
         Image.objects.bulk_create(image_records)
         dataset.statut = Dataset.Statut.READY
         dataset.nb_images = len(image_records)
         dataset.save(update_fields=["statut", "nb_images"])
+
     except Exception as exc:
         duration = int((time.monotonic() - t0) * 1000)
         _log_etl(run_id, dataset_id, "load", "error",
-                 message=f"DB write failed: {exc}", duration_ms=duration)
+                 message=f"Load failed: {exc}", duration_ms=duration)
         logger.exception("Unexpected error loading dataset %s.", dataset_id)
         dataset.statut = Dataset.Statut.ERROR
         dataset.error_message = f"Unexpected error: {exc}"
@@ -149,15 +279,14 @@ def process_dataset_zip(self, dataset_id: int):
         raise self.retry(exc=exc)
 
     duration = int((time.monotonic() - t0) * 1000)
+    skipped_msg = f" ({upload_errors} upload errors skipped)" if upload_errors else ""
     _log_etl(run_id, dataset_id, "load", "success",
-             message=f"{len(image_records)} images saved", duration_ms=duration)
+             message=f"{len(image_records)} images saved to MinIO{skipped_msg}",
+             duration_ms=duration)
     logger.info(
-        "Dataset %s ready — %d images extracted [run=%s].",
+        "Dataset %s ready — %d images uploaded to MinIO [run=%s].",
         dataset_id, len(image_records), run_id,
     )
-
-    # Phase 2: HuggingFace inference is triggered at attempt time (on-demand),
-    # not during ETL. See ml/registry.py predict() and ml/adapters.py.
 
 
 @app.task(bind=True)
@@ -227,7 +356,6 @@ def run_inference(self, image_id: int, maladie: str) -> dict:
     Returns:
         {"label": "malade"|"sain", "confidence": float, "raw_label": str}
     """
-    import io
     import time
 
     from django.core.files.storage import default_storage

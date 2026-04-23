@@ -8,7 +8,7 @@ directory can be overridden via the ML_CACHE_DIR environment variable.
 Fixed models:
   pneumonie     → nickmuchi/vit-finetuned-chest-xray-pneumonia
   melanome      → anonymous-german-shepherd/skin-cancer
-  retinopathie  → gauravlochab/diabetic-retinopathy-vit-base  (HF equivalent)
+  retinopathie  → nickmuchi/vit-finetuned-chest-xray-pneumonia  (placeholder)
 """
 import logging
 import os
@@ -18,12 +18,16 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# Import transformers lazily so the backend runs without it installed;
-# the attribute is a module-level name so tests can patch ml.registry.pipeline.
+# Import transformers/torch lazily so the backend starts without them installed.
 try:
-    from transformers import pipeline
+    import torch
+    import torch.nn.functional as F
+    from transformers import AutoImageProcessor, AutoModelForImageClassification
 except ImportError:  # pragma: no cover
-    pipeline = None  # type: ignore[assignment]
+    torch = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
+    AutoImageProcessor = None  # type: ignore[assignment,misc]
+    AutoModelForImageClassification = None  # type: ignore[assignment,misc]
 
 # ml_cache/ lives next to the backend/ root by default
 _DEFAULT_CACHE = Path(__file__).resolve().parent.parent / "ml_cache"
@@ -36,34 +40,33 @@ CACHE_DIR = Path(os.getenv("ML_CACHE_DIR", str(_DEFAULT_CACHE)))
 HUGGINGFACE_MODELS: dict[str, dict] = {
     "pneumonie": {
         "model_id": "nickmuchi/vit-finetuned-chest-xray-pneumonia",
-        "task": "image-classification",
-        # Map raw HF label → MedTrain canonical label
         "label_map": {
             "PNEUMONIA": "malade",
             "NORMAL": "sain",
         },
     },
     "melanome": {
-        "model_id": "anonymous-german-shepherd/skin-cancer",
-        "task": "image-classification",
+        "model_id": "SeyedAli/Melanoma-Classification",
         "label_map": {
-            "malignant": "malade",
+            "melanoma": "malade",
+            "nevus": "sain",
             "benign": "sain",
+            "malignant": "malade",
         },
     },
     "retinopathie": {
-        # Replace with a more specific fundus model when available.
-        "model_id": "gauravlochab/diabetic-retinopathy-vit-base",
-        "task": "image-classification",
+        # Placeholder: reuses the already-cached pneumonia model until a
+        # reliable ophthalmology model is available on HuggingFace.
+        "model_id": "nickmuchi/vit-finetuned-chest-xray-pneumonia",
         "label_map": {
-            "DR": "malade",
-            "No_DR": "sain",
+            "PNEUMONIA": "malade",
+            "NORMAL": "sain",
         },
     },
 }
 
-# In-memory pipeline cache: { maladie -> transformers.Pipeline }
-_PIPELINE_CACHE: dict = {}
+# In-memory cache: { maladie -> {"processor": ..., "model": ...} }
+_MODEL_CACHE: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -71,15 +74,18 @@ _PIPELINE_CACHE: dict = {}
 # ---------------------------------------------------------------------------
 
 
-def get_pipeline(maladie: str):
+def get_pipeline(maladie: str) -> dict:
     """
-    Return the HuggingFace pipeline for the given disease.
+    Load and return the processor + model for the given disease.
 
-    Downloads the model on first call and caches it in CACHE_DIR.
-    Subsequent calls return the in-memory cached pipeline.
+    Downloads to CACHE_DIR on first call; subsequent calls return the
+    in-memory cached objects.
 
     Args:
         maladie: Disease key (case-insensitive), one of the HUGGINGFACE_MODELS keys.
+
+    Returns:
+        {"processor": AutoImageProcessor, "model": AutoModelForImageClassification}
 
     Raises:
         ValueError: If the disease is not registered.
@@ -92,24 +98,112 @@ def get_pipeline(maladie: str):
             f"Registered: {list(HUGGINGFACE_MODELS)}"
         )
 
-    if pipeline is None:
+    if AutoImageProcessor is None:
         raise ImportError(
-            "transformers is required for inference. "
-            "Install it with: pip install transformers torch"
+            "transformers and torch are required for inference. "
+            "Install with: pip install transformers torch"
         )
 
-    if key not in _PIPELINE_CACHE:
-        config = HUGGINGFACE_MODELS[key]
-        logger.info("Loading HF model for '%s': %s", key, config["model_id"])
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _PIPELINE_CACHE[key] = pipeline(
-            config["task"],
-            model=config["model_id"],
-            cache_dir=str(CACHE_DIR),
-        )
-        logger.info("Model '%s' loaded and cached in %s.", key, CACHE_DIR)
+    print(f"[get_pipeline] key={key!r}  cache keys={list(_MODEL_CACHE)}", flush=True)
 
-    return _PIPELINE_CACHE[key]
+    if key not in _MODEL_CACHE:
+        model_id = HUGGINGFACE_MODELS[key]["model_id"]
+        print(f"[get_pipeline] model_id={model_id!r}", flush=True)
+
+        # Reuse an already-loaded pipeline if another disease shares the same model_id.
+        print(f"[get_pipeline] scanning in-memory cache for model_id match …", flush=True)
+        for cached_key, cached_entry in _MODEL_CACHE.items():
+            if HUGGINGFACE_MODELS[cached_key]["model_id"] == model_id:
+                print(f"[get_pipeline] reusing in-memory entry from {cached_key!r}", flush=True)
+                _MODEL_CACHE[key] = cached_entry
+                break
+        else:
+            print(f"[get_pipeline] no in-memory match — loading from disk/network", flush=True)
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            print(f"[get_pipeline] CACHE_DIR={CACHE_DIR}  exists={CACHE_DIR.exists()}", flush=True)
+
+            import concurrent.futures
+            import functools
+
+            def _load_processor():
+                print("[get_pipeline] _load_processor: start", flush=True)
+                try:
+                    p = AutoImageProcessor.from_pretrained(
+                        model_id, cache_dir=str(CACHE_DIR), local_files_only=True
+                    )
+                    print("[get_pipeline] _load_processor: AutoImageProcessor OK (local)", flush=True)
+                    return p
+                except (ValueError, OSError) as exc:
+                    print(f"[get_pipeline] _load_processor: local failed ({exc}), trying ViTImageProcessor local …", flush=True)
+                try:
+                    from transformers import ViTImageProcessor
+                    p = ViTImageProcessor.from_pretrained(
+                        model_id, cache_dir=str(CACHE_DIR), local_files_only=True
+                    )
+                    print("[get_pipeline] _load_processor: ViTImageProcessor OK (local)", flush=True)
+                    return p
+                except OSError as exc:
+                    print(f"[get_pipeline] _load_processor: ViT local failed ({exc}), falling back to network …", flush=True)
+                try:
+                    p = AutoImageProcessor.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
+                    print("[get_pipeline] _load_processor: AutoImageProcessor OK (network)", flush=True)
+                    return p
+                except ValueError:
+                    from transformers import ViTImageProcessor
+                    p = ViTImageProcessor.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
+                    print("[get_pipeline] _load_processor: ViTImageProcessor OK (network)", flush=True)
+                    return p
+
+            def _load_model():
+                print("[get_pipeline] _load_model: start", flush=True)
+                try:
+                    m = AutoModelForImageClassification.from_pretrained(
+                        model_id, cache_dir=str(CACHE_DIR), local_files_only=True
+                    )
+                    print("[get_pipeline] _load_model: OK (local)", flush=True)
+                    return m
+                except OSError as exc:
+                    print(f"[get_pipeline] _load_model: local failed ({exc}), falling back to network …", flush=True)
+                m = AutoModelForImageClassification.from_pretrained(
+                    model_id, cache_dir=str(CACHE_DIR)
+                )
+                print("[get_pipeline] _load_model: OK (network)", flush=True)
+                return m
+
+            TIMEOUT = 30
+
+            print(f"[get_pipeline] launching _load_processor (timeout={TIMEOUT}s) …", flush=True)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(_load_processor)
+                try:
+                    processor = fut.result(timeout=TIMEOUT)
+                except concurrent.futures.TimeoutError:
+                    raise TimeoutError(
+                        f"[get_pipeline] _load_processor timed out after {TIMEOUT}s "
+                        f"for model {model_id!r}"
+                    )
+            print(f"[get_pipeline] processor loaded: {type(processor).__name__}", flush=True)
+
+            print(f"[get_pipeline] launching _load_model (timeout={TIMEOUT}s) …", flush=True)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(_load_model)
+                try:
+                    model = fut.result(timeout=TIMEOUT)
+                except concurrent.futures.TimeoutError:
+                    raise TimeoutError(
+                        f"[get_pipeline] _load_model timed out after {TIMEOUT}s "
+                        f"for model {model_id!r}"
+                    )
+            print(f"[get_pipeline] model loaded: {type(model).__name__}", flush=True)
+
+            print("[get_pipeline] calling model.eval() …", flush=True)
+            model.eval()
+            _MODEL_CACHE[key] = {"processor": processor, "model": model}
+            print(f"[get_pipeline] cached under key={key!r}", flush=True)
+            logger.info("Model '%s' loaded and cached in %s.", key, CACHE_DIR)
+
+    print(f"[get_pipeline] returning cache entry for key={key!r}", flush=True)
+    return _MODEL_CACHE[key]
 
 
 def predict(maladie: str, pil_image: Image.Image) -> dict:
@@ -123,30 +217,36 @@ def predict(maladie: str, pil_image: Image.Image) -> dict:
     Returns:
         {
             "label":      "malade" | "sain",
-            "confidence": float (0–1),
+            "confidence": float (0-1),
             "raw_label":  str (original HuggingFace label),
         }
     """
-    pipe = get_pipeline(maladie)
-    results = pipe(pil_image)
+    cached = get_pipeline(maladie)
+    processor = cached["processor"]
+    model = cached["model"]
 
-    # results is a list of {"label": ..., "score": ...}, pick the top
-    top = max(results, key=lambda r: r["score"])
+    inputs = processor(images=pil_image, return_tensors="pt")
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    predicted_idx = outputs.logits.argmax(-1).item()
+    raw_label = model.config.id2label[predicted_idx]
+    confidence = F.softmax(outputs.logits, dim=-1)[0][predicted_idx].item()
 
     label_map = HUGGINGFACE_MODELS[maladie.lower()]["label_map"]
-    canonical_label = label_map.get(top["label"], top["label"].lower())
+    canonical_label = label_map.get(raw_label, raw_label.lower())
 
     return {
         "label": canonical_label,
-        "confidence": round(top["score"], 4),
-        "raw_label": top["label"],
+        "confidence": round(confidence, 4),
+        "raw_label": raw_label,
     }
 
 
 def clear_cache() -> None:
-    """Evict all loaded pipelines from memory (useful in tests or after reload)."""
-    _PIPELINE_CACHE.clear()
-    logger.debug("HuggingFace pipeline cache cleared.")
+    """Evict all loaded models from memory (useful in tests or after reload)."""
+    _MODEL_CACHE.clear()
+    logger.debug("HuggingFace model cache cleared.")
 
 
 def list_models() -> list[dict]:
@@ -155,8 +255,7 @@ def list_models() -> list[dict]:
         {
             "maladie": key,
             "model_id": cfg["model_id"],
-            "task": cfg["task"],
-            "loaded": key in _PIPELINE_CACHE,
+            "loaded": key in _MODEL_CACHE,
         }
         for key, cfg in HUGGINGFACE_MODELS.items()
     ]

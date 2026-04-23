@@ -9,10 +9,16 @@ services:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-prod}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      # Explicit path so Django never falls back to /app/analytics.db on the
+      # Windows bind mount (NTFS files are root-owned in WSL2, appuser can't write them).
+      ANALYTICS_DB_NAME: analytics_db/analytics.db
     volumes:
       - ./backend:/app          # live source mount — changes reflect immediately
       - staticfiles:/app/staticfiles
       - media:/app/media
+      # analytics_db is mounted INSIDE the bind mount, shadowing ./backend/analytics_db/.
+      # The named volume is owned by appuser so SQLite can write freely.
+      - analytics_db:/app/analytics_db
     ports:
       - "8000:8000"
 
@@ -25,9 +31,11 @@ services:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-prod}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      ANALYTICS_DB_NAME: analytics_db/analytics.db
     volumes:
       - ./backend:/app          # same source mount for task code hot-reload
       - media:/app/media
+      - analytics_db:/app/analytics_db
 
   db:
     ports:

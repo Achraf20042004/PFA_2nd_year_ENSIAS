@@ -207,7 +207,6 @@ CELERY_TIMEZONE = TIME_ZONE
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "minio")
 
 if STORAGE_BACKEND == "s3":
-    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
     AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_S3_BUCKET", "medtrain")
@@ -215,13 +214,31 @@ if STORAGE_BACKEND == "s3":
     AWS_DEFAULT_ACL = "private"
 else:
     # MinIO via boto3-compatible interface
-    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
     AWS_ACCESS_KEY_ID = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     AWS_SECRET_ACCESS_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
     AWS_STORAGE_BUCKET_NAME = os.getenv("MINIO_BUCKET", "medtrain")
     AWS_S3_ENDPOINT_URL = f"http://{os.getenv('MINIO_ENDPOINT', 'localhost:9000')}"
-    AWS_DEFAULT_ACL = "private"
+    AWS_DEFAULT_ACL = "public-read"
+    AWS_QUERYSTRING_AUTH = False
     AWS_S3_VERIFY = False
+
+# Django 4.2+ requires STORAGES dict; DEFAULT_FILE_STORAGE is ignored in Django 5+
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+MINIO_PUBLIC_URL = os.getenv("MINIO_PUBLIC_URL", "http://localhost:9000")
+
+# Exposed as top-level settings so tasks can use settings.MINIO_* directly
+MINIO_ENDPOINT   = os.getenv("MINIO_ENDPOINT",   "localhost:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY",  "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY",  "minioadmin")
+MINIO_BUCKET     = os.getenv("MINIO_BUCKET",      "medtrain")
 
 # MLflow
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")

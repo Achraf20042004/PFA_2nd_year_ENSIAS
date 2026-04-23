@@ -1,6 +1,7 @@
 """
 Serializers for the results app.
 """
+from django.conf import settings
 from rest_framework import serializers
 
 from apps.results.models import Attempt, ImageResult
@@ -37,14 +38,20 @@ class SubmitAttemptSerializer(serializers.Serializer):
 class ImageResultFeedbackSerializer(serializers.ModelSerializer):
     image_id = serializers.IntegerField(source="image.id")
     chemin = serializers.CharField(source="image.chemin")
+    url = serializers.SerializerMethodField()
     label = serializers.CharField(source="image.label")  # ground truth revealed in feedback
     ml_confidence = serializers.FloatField(allow_null=True)
     ml_prediction = serializers.CharField(allow_null=True)
 
+    def get_url(self, obj):
+        bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", "medtrain")
+        public_base = f"{settings.MINIO_PUBLIC_URL}/{bucket}"
+        return f"{public_base}/{obj.image.chemin}"
+
     class Meta:
         model = ImageResult
         fields = [
-            "image_id", "chemin", "label",
+            "image_id", "chemin", "url", "label",
             "reponse_etudiant", "reponse_modele",
             "ml_prediction", "ml_confidence",
             "correct", "gradcam_path",

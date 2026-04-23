@@ -80,6 +80,7 @@ class SessionImageSerializer(serializers.Serializer):
     """Image representation in a session — no label exposed."""
     id = serializers.IntegerField()
     chemin = serializers.CharField()
+    url = serializers.CharField()
 
 
 class ExerciseSessionSerializer(serializers.Serializer):

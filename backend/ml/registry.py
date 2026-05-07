@@ -14,6 +14,13 @@ import logging
 import os
 from pathlib import Path
 
+# Force offline mode before any HuggingFace library is imported.
+# huggingface_hub reads these at import time; setting them here guarantees
+# they are in place regardless of what the container environment provides.
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -78,8 +85,8 @@ def get_pipeline(maladie: str) -> dict:
     """
     Load and return the processor + model for the given disease.
 
-    Downloads to CACHE_DIR on first call; subsequent calls return the
-    in-memory cached objects.
+    Always loads from the local CACHE_DIR (local_files_only=True). Raises
+    OSError if the model has not been pre-downloaded to that directory.
 
     Args:
         maladie: Disease key (case-insensitive), one of the HUGGINGFACE_MODELS keys.
@@ -90,6 +97,7 @@ def get_pipeline(maladie: str) -> dict:
     Raises:
         ValueError: If the disease is not registered.
         ImportError: If transformers/torch are not installed.
+        OSError: If the model is not found in CACHE_DIR.
     """
     key = maladie.lower().strip()
     if key not in HUGGINGFACE_MODELS:
@@ -104,105 +112,40 @@ def get_pipeline(maladie: str) -> dict:
             "Install with: pip install transformers torch"
         )
 
-    print(f"[get_pipeline] key={key!r}  cache keys={list(_MODEL_CACHE)}", flush=True)
-
     if key not in _MODEL_CACHE:
         model_id = HUGGINGFACE_MODELS[key]["model_id"]
-        print(f"[get_pipeline] model_id={model_id!r}", flush=True)
 
-        # Reuse an already-loaded pipeline if another disease shares the same model_id.
-        print(f"[get_pipeline] scanning in-memory cache for model_id match …", flush=True)
+        # Reuse an already-loaded pipeline when two diseases share the same model_id
+        # (e.g. retinopathie reuses the pneumonie model).
         for cached_key, cached_entry in _MODEL_CACHE.items():
             if HUGGINGFACE_MODELS[cached_key]["model_id"] == model_id:
-                print(f"[get_pipeline] reusing in-memory entry from {cached_key!r}", flush=True)
+                logger.info("Reusing in-memory pipeline from '%s' for '%s'.", cached_key, key)
                 _MODEL_CACHE[key] = cached_entry
                 break
         else:
-            print(f"[get_pipeline] no in-memory match — loading from disk/network", flush=True)
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            print(f"[get_pipeline] CACHE_DIR={CACHE_DIR}  exists={CACHE_DIR.exists()}", flush=True)
+            logger.info("Loading '%s' from local cache %s …", model_id, CACHE_DIR)
 
-            import concurrent.futures
-            import functools
-
-            def _load_processor():
-                print("[get_pipeline] _load_processor: start", flush=True)
-                try:
-                    p = AutoImageProcessor.from_pretrained(
-                        model_id, cache_dir=str(CACHE_DIR), local_files_only=True
-                    )
-                    print("[get_pipeline] _load_processor: AutoImageProcessor OK (local)", flush=True)
-                    return p
-                except (ValueError, OSError) as exc:
-                    print(f"[get_pipeline] _load_processor: local failed ({exc}), trying ViTImageProcessor local …", flush=True)
-                try:
-                    from transformers import ViTImageProcessor
-                    p = ViTImageProcessor.from_pretrained(
-                        model_id, cache_dir=str(CACHE_DIR), local_files_only=True
-                    )
-                    print("[get_pipeline] _load_processor: ViTImageProcessor OK (local)", flush=True)
-                    return p
-                except OSError as exc:
-                    print(f"[get_pipeline] _load_processor: ViT local failed ({exc}), falling back to network …", flush=True)
-                try:
-                    p = AutoImageProcessor.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
-                    print("[get_pipeline] _load_processor: AutoImageProcessor OK (network)", flush=True)
-                    return p
-                except ValueError:
-                    from transformers import ViTImageProcessor
-                    p = ViTImageProcessor.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
-                    print("[get_pipeline] _load_processor: ViTImageProcessor OK (network)", flush=True)
-                    return p
-
-            def _load_model():
-                print("[get_pipeline] _load_model: start", flush=True)
-                try:
-                    m = AutoModelForImageClassification.from_pretrained(
-                        model_id, cache_dir=str(CACHE_DIR), local_files_only=True
-                    )
-                    print("[get_pipeline] _load_model: OK (local)", flush=True)
-                    return m
-                except OSError as exc:
-                    print(f"[get_pipeline] _load_model: local failed ({exc}), falling back to network …", flush=True)
-                m = AutoModelForImageClassification.from_pretrained(
-                    model_id, cache_dir=str(CACHE_DIR)
+            # Processor — AutoImageProcessor first; some ViT checkpoints need the
+            # explicit ViTImageProcessor class. Both calls use local_files_only=True.
+            try:
+                processor = AutoImageProcessor.from_pretrained(
+                    model_id, cache_dir=str(CACHE_DIR), local_files_only=True
                 )
-                print("[get_pipeline] _load_model: OK (network)", flush=True)
-                return m
+            except (ValueError, OSError):
+                from transformers import ViTImageProcessor
+                processor = ViTImageProcessor.from_pretrained(
+                    model_id, cache_dir=str(CACHE_DIR), local_files_only=True
+                )
 
-            TIMEOUT = 30
-
-            print(f"[get_pipeline] launching _load_processor (timeout={TIMEOUT}s) …", flush=True)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                fut = ex.submit(_load_processor)
-                try:
-                    processor = fut.result(timeout=TIMEOUT)
-                except concurrent.futures.TimeoutError:
-                    raise TimeoutError(
-                        f"[get_pipeline] _load_processor timed out after {TIMEOUT}s "
-                        f"for model {model_id!r}"
-                    )
-            print(f"[get_pipeline] processor loaded: {type(processor).__name__}", flush=True)
-
-            print(f"[get_pipeline] launching _load_model (timeout={TIMEOUT}s) …", flush=True)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                fut = ex.submit(_load_model)
-                try:
-                    model = fut.result(timeout=TIMEOUT)
-                except concurrent.futures.TimeoutError:
-                    raise TimeoutError(
-                        f"[get_pipeline] _load_model timed out after {TIMEOUT}s "
-                        f"for model {model_id!r}"
-                    )
-            print(f"[get_pipeline] model loaded: {type(model).__name__}", flush=True)
-
-            print("[get_pipeline] calling model.eval() …", flush=True)
+            model = AutoModelForImageClassification.from_pretrained(
+                model_id, cache_dir=str(CACHE_DIR), local_files_only=True
+            )
             model.eval()
-            _MODEL_CACHE[key] = {"processor": processor, "model": model}
-            print(f"[get_pipeline] cached under key={key!r}", flush=True)
-            logger.info("Model '%s' loaded and cached in %s.", key, CACHE_DIR)
 
-    print(f"[get_pipeline] returning cache entry for key={key!r}", flush=True)
+            _MODEL_CACHE[key] = {"processor": processor, "model": model}
+            logger.info("Model '%s' loaded and cached in memory.", key)
+
     return _MODEL_CACHE[key]
 
 

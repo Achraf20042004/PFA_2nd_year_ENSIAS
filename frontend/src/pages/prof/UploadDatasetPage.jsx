@@ -153,7 +153,7 @@ export default function UploadDatasetPage() {
         </h2>
 
         <div className="bg-primary-light border border-primary/20 rounded-xl px-4 py-3 text-sm text-primary mb-4">
-          Le ZIP doit contenir deux dossiers : <code className="font-mono bg-primary/10 px-1 rounded">malade/</code> et <code className="font-mono bg-primary/10 px-1 rounded">sain/</code>, chacun avec au moins 10 images JPEG/PNG.
+          Le ZIP peut contenir des images JPEG/PNG à n'importe quelle profondeur — aucun sous-dossier requis. Le pipeline ETL classifiera automatiquement chaque image (<strong>malade</strong> / <strong>sain</strong>) via le modèle IA du domaine sélectionné.
         </div>
 
         {/* Drop zone */}

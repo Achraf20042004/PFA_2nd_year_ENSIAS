@@ -104,6 +104,9 @@ services:
       EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
       EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
       ANALYTICS_DB_NAME: analytics_db/analytics.db
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
     volumes:
       - staticfiles:/app/staticfiles
       - media:/app/media
@@ -150,6 +153,9 @@ services:
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://localhost:5000}
       MODEL_ACCURACY_THRESHOLD: ${MODEL_ACCURACY_THRESHOLD:-0.80}
       ANALYTICS_DB_NAME: analytics_db/analytics.db
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
     volumes:
       - media:/app/media
       - ml_cache:/app/ml_cache

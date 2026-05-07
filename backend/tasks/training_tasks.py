@@ -105,17 +105,11 @@ def process_dataset_zip(self, dataset_id: int):
         dataset.save(update_fields=["statut", "error_message"])
         raise self.retry(exc=exc)
 
-    malade_count = sum(1 for r in raw_items if r.label == "malade")
-    sain_count = sum(1 for r in raw_items if r.label == "sain")
     duration = int((time.monotonic() - t0) * 1000)
     _log_etl(run_id, dataset_id, "validate", "success",
-             message=f"{len(raw_items)} images validated "
-                     f"(malade={malade_count}, sain={sain_count})",
+             message=f"{len(raw_items)} images validated — labels determined by ML in load step",
              duration_ms=duration)
-    logger.info(
-        "Dataset %s validated: %d total images — malade=%d, sain=%d.",
-        dataset_id, len(raw_items), malade_count, sain_count,
-    )
+    logger.info("Dataset %s validated: %d images ready for ML labelling.", dataset_id, len(raw_items))
 
     # ------------------------------------------------------------------ #
     # Step: transform — smoke-test the adapter on a sample image in-memory.
@@ -174,6 +168,7 @@ def process_dataset_zip(self, dataset_id: int):
 
         from apps.datasets.models import Image
         from ml.adapters import get_adapter
+        from ml.registry import predict
 
         # When MINIO_ENDPOINT is empty (test environment) fall back to
         # default_storage so tests don't need a live MinIO.
@@ -193,13 +188,13 @@ def process_dataset_zip(self, dataset_id: int):
             from django.core.files.base import ContentFile
             from django.core.files.storage import default_storage
 
-        # Resolve adapter once; None means preprocessed uploads are skipped
+        # Resolve adapter once; None means we cannot label images via ML.
         try:
             adapter = get_adapter(dataset.maladie)
         except ValueError:
             adapter = None
             logger.warning(
-                "No adapter for disease '%s' — skipping preprocessed uploads.",
+                "No adapter for disease '%s' — all images will be skipped.",
                 dataset.maladie,
             )
 
@@ -207,12 +202,27 @@ def process_dataset_zip(self, dataset_id: int):
         upload_errors = 0
 
         for item in raw_items:
-            label = item.label
             filename = item.filename
             raw_bytes = item.data
             ext = Path(filename).suffix.lower()
 
-            # 1. Upload original image
+            # 1. Preprocess + ML inference to determine label ("malade" / "sain")
+            if adapter is None:
+                upload_errors += 1
+                logger.warning("No adapter for '%s' — skipping %s.", dataset.maladie, filename)
+                continue
+
+            try:
+                pil_img = adapter.preprocess(raw_bytes)
+                result = predict(dataset.maladie, pil_img)
+                label = result["label"]
+                logger.info("ML label for %s: %s (confidence=%.3f)", filename, label, result["confidence"])
+            except Exception as exc:
+                upload_errors += 1
+                logger.warning("ML inference failed for %s — skipping: %s", filename, exc)
+                continue
+
+            # 2. Upload original image
             orig_key = f"datasets/{dataset_id}/images/{label}/{filename}"
             try:
                 if use_minio:
@@ -229,30 +239,26 @@ def process_dataset_zip(self, dataset_id: int):
                 logger.error("Failed to upload %s: %s", orig_key, exc)
                 continue  # skip this image, do not add a DB record
 
-            # 2. Upload preprocessed image (non-fatal)
-            if adapter is not None:
-                try:
-                    pil_img = adapter.preprocess(raw_bytes)
-                    buf = io.BytesIO()
-                    fmt = "JPEG" if ext in (".jpg", ".jpeg") else "PNG"
-                    pil_img.save(buf, format=fmt)
-                    buf.seek(0)
-                    pre_key = f"datasets/{dataset_id}/preprocessed/{filename}"
-                    if use_minio:
-                        s3.upload_fileobj(
-                            buf,
-                            bucket,
-                            pre_key,
-                            ExtraArgs={"ACL": "public-read"},
-                        )
-                    else:
-                        default_storage.save(pre_key, ContentFile(buf.getvalue()))
-                except Exception as exc:
-                    logger.warning(
-                        "Preprocessed upload skipped for %s: %s", filename, exc
+            # 3. Upload preprocessed image (non-fatal) — pil_img already computed
+            try:
+                buf = io.BytesIO()
+                fmt = "JPEG" if ext in (".jpg", ".jpeg") else "PNG"
+                pil_img.save(buf, format=fmt)
+                buf.seek(0)
+                pre_key = f"datasets/{dataset_id}/preprocessed/{filename}"
+                if use_minio:
+                    s3.upload_fileobj(
+                        buf,
+                        bucket,
+                        pre_key,
+                        ExtraArgs={"ACL": "public-read"},
                     )
+                else:
+                    default_storage.save(pre_key, ContentFile(buf.getvalue()))
+            except Exception as exc:
+                logger.warning("Preprocessed upload skipped for %s: %s", filename, exc)
 
-            # 3. Record the MinIO key as the canonical path
+            # 4. Record the MinIO key as the canonical path
             image_records.append(
                 Image(dataset=dataset, chemin=orig_key, label=label)
             )
@@ -278,14 +284,19 @@ def process_dataset_zip(self, dataset_id: int):
         dataset.save(update_fields=["statut", "error_message"])
         raise self.retry(exc=exc)
 
+    malade_saved = sum(1 for img in image_records if img.label == "malade")
+    sain_saved = sum(1 for img in image_records if img.label == "sain")
     duration = int((time.monotonic() - t0) * 1000)
-    skipped_msg = f" ({upload_errors} upload errors skipped)" if upload_errors else ""
+    skipped_msg = f" ({upload_errors} skipped)" if upload_errors else ""
     _log_etl(run_id, dataset_id, "load", "success",
-             message=f"{len(image_records)} images saved to MinIO{skipped_msg}",
+             message=(
+                 f"{len(image_records)} images saved to MinIO "
+                 f"(malade={malade_saved}, sain={sain_saved}){skipped_msg}"
+             ),
              duration_ms=duration)
     logger.info(
-        "Dataset %s ready — %d images uploaded to MinIO [run=%s].",
-        dataset_id, len(image_records), run_id,
+        "Dataset %s ready — %d images (malade=%d, sain=%d) uploaded to MinIO [run=%s].",
+        dataset_id, len(image_records), malade_saved, sain_saved, run_id,
     )
 
 

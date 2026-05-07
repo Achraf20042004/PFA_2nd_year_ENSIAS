@@ -100,5 +100,15 @@ def get_exercise_images(student, exercise, n=10):
             pool = unseen + backfill
             selected.extend(random.sample(pool, min(count, len(pool))))
 
+    # If the dataset is imbalanced and we still don't have n images,
+    # backfill from any remaining images not yet selected.
+    if len(selected) < n:
+        selected_ids = {img.id for img in selected}
+        remaining = list(
+            Image.objects.filter(dataset=exercise.dataset).exclude(id__in=selected_ids)
+        )
+        need = n - len(selected)
+        selected.extend(random.sample(remaining, min(len(remaining), need)))
+
     random.shuffle(selected)
     return selected

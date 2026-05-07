@@ -19,6 +19,34 @@ class SubmissionError(Exception):
 # ---------------------------------------------------------------------------
 
 
+def _read_image_bytes(image) -> bytes:
+    """
+    Read raw image bytes from MinIO using direct boto3 (same path as ETL).
+    Falls back to default_storage if MinIO endpoint is not configured.
+    """
+    from django.conf import settings
+
+    minio_endpoint = getattr(settings, "MINIO_ENDPOINT", "")
+    if minio_endpoint:
+        import boto3
+        from botocore.client import Config as BotocoreConfig
+
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=f"http://{minio_endpoint}",
+            aws_access_key_id=settings.MINIO_ACCESS_KEY,
+            aws_secret_access_key=settings.MINIO_SECRET_KEY,
+            config=BotocoreConfig(signature_version="s3v4"),
+            verify=False,
+        )
+        response = s3.get_object(Bucket=settings.MINIO_BUCKET, Key=image.chemin)
+        return response["Body"].read()
+
+    from django.core.files.storage import default_storage
+    with default_storage.open(image.chemin) as fh:
+        return fh.read()
+
+
 def _run_ml_inference(maladie: str, image) -> tuple[str, float | None]:
     """
     Run HuggingFace inference for one image.
@@ -27,23 +55,26 @@ def _run_ml_inference(maladie: str, image) -> tuple[str, float | None]:
     label with confidence=None when inference is unavailable (transformers not
     installed, storage unreachable, unknown disease adapter, etc.).
     """
+    logger.info("ML inference called: image=%s maladie=%s", image.id, maladie)
     try:
-        from django.core.files.storage import default_storage
         from ml.adapters import get_adapter
         from ml.registry import predict
 
         adapter = get_adapter(maladie)
-        with default_storage.open(image.chemin) as fh:
-            raw_bytes = fh.read()
+        raw_bytes = _read_image_bytes(image)
         pil_image = adapter.preprocess(raw_bytes)
         result = predict(maladie, pil_image)
+        logger.info(
+            "ML inference result: image=%s maladie=%s label=%s confidence=%.4f",
+            image.id, maladie, result["label"], result["confidence"],
+        )
         return result["label"], result["confidence"]
 
     except Exception:
-        # Inference unavailable — keep behaviour identical to Phase 1.
-        logger.debug(
-            "ML inference unavailable for image %s (maladie=%s); using ground-truth fallback.",
+        logger.error(
+            "ML inference FAILED for image %s (maladie=%s) — falling back to ground-truth label.",
             image.id, maladie,
+            exc_info=True,
         )
         return image.label, None
 

@@ -39,15 +39,14 @@ function ImageResultCard({ result, index }) {
   const correct = result.correct
   const hasGradcam = !!result.gradcam_path
   const confidence = result.ml_confidence != null ? Math.round(result.ml_confidence * 100) : null
-  const hasRecommendation = !!result.cours_recommande
 
   return (
     <div className={`bg-white rounded-2xl border overflow-hidden shadow-sm ${correct ? 'border-slate-100' : 'border-red-100'}`}>
       {/* Image */}
       <div className="relative bg-slate-900 aspect-video max-h-48 flex items-center justify-center overflow-hidden">
-        {(result.image?.url ?? result.image?.chemin) ? (
+        {(result.url ?? result.chemin) ? (
           <img
-            src={result.image.url ?? result.image.chemin}
+            src={result.url ?? result.chemin}
             alt={`Image ${index + 1}`}
             className="w-full h-full object-contain"
           />
@@ -112,24 +111,6 @@ function ImageResultCard({ result, index }) {
           </div>
         </div>
 
-        {/* Course recommendation */}
-        {hasRecommendation && (
-          <div className="mt-3 bg-primary-light border border-primary/20 rounded-xl p-3 flex items-start gap-3">
-            <IconBook className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-            <div>
-              <p className="text-xs font-semibold text-primary mb-0.5">Cours recommandé</p>
-              <p className="text-sm text-slate-700">{result.cours_recommande.titre}</p>
-              {result.cours_recommande.id && (
-                <Link
-                  to={`/courses/${result.cours_recommande.id}`}
-                  className="text-xs text-primary font-medium hover:underline mt-1 inline-block"
-                >
-                  Voir le cours →
-                </Link>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
@@ -162,11 +143,11 @@ export default function FeedbackPage() {
     )
   }
 
-  const score = feedback.score ?? 0
+  const score = Math.round((feedback.score ?? 0) * 100)
   const results = feedback.image_results ?? []
   const correctCount = results.filter((r) => r.correct).length
   const incorrectCount = results.length - correctCount
-  const hasCourseRecommendations = results.some((r) => r.cours_recommande)
+  const hasCourseRecommendations = !!feedback.cours_recommande
 
   const scoreLabel = score >= 80 ? 'Excellent !' : score >= 60 ? 'Bien !' : 'À améliorer'
   const scoreColor = score >= 80 ? 'text-primary' : score >= 60 ? 'text-amber-600' : 'text-red-600'
@@ -231,16 +212,22 @@ export default function FeedbackPage() {
         </div>
       </div>
 
-      {/* Course recommendations summary */}
+      {/* Course recommendation (one per attempt, from exercise linked course) */}
       {hasCourseRecommendations && (
         <div className="bg-primary-light border border-primary/20 rounded-2xl p-5 mb-6">
           <div className="flex items-center gap-2 mb-2">
             <IconBook className="w-4 h-4 text-primary" />
-            <h2 className="font-heading font-semibold text-primary text-sm">Cours recommandés</h2>
+            <h2 className="font-heading font-semibold text-primary text-sm">Cours recommandé</h2>
           </div>
-          <p className="text-sm text-slate-600">
-            Des cours ont été identifiés pour vous aider à progresser sur vos réponses incorrectes. Consultez-les ci-dessous.
-          </p>
+          <p className="text-sm text-slate-700 font-medium">{feedback.cours_recommande.titre}</p>
+          {feedback.cours_recommande.id && (
+            <Link
+              to={`/courses/${feedback.cours_recommande.id}`}
+              className="text-xs text-primary font-medium hover:underline mt-1 inline-block"
+            >
+              Voir le cours →
+            </Link>
+          )}
         </div>
       )}
 

@@ -32,6 +32,9 @@ import UsersPage from './pages/admin/UsersPage'
 import ETLLogsPage from './pages/admin/ETLLogsPage'
 import ModelMetricsPage from './pages/admin/ModelMetricsPage'
 
+// Streaming dashboard (prof + admin)
+import StreamingDashboard from './pages/StreamingDashboard'
+
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 function dashboardPathForRole(role) {
@@ -82,7 +85,7 @@ function RootRedirect() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-50">
+      <div className="flex h-screen items-center justify-center bg-[#F7FFFE]">
         <LoadingSpinner size="lg" />
       </div>
     )
@@ -142,6 +145,14 @@ const router = createBrowserRouter([
               { path: '/users', element: <UsersPage /> },
               { path: '/etl-logs', element: <ETLLogsPage /> },
               { path: '/model-metrics', element: <ModelMetricsPage /> },
+            ],
+          },
+
+          // ── Streaming dashboard (prof + admin only) ───────────────────
+          {
+            element: <RoleRoute allowed={['prof', 'admin']} />,
+            children: [
+              { path: '/dashboard/streaming', element: <StreamingDashboard /> },
             ],
           },
 

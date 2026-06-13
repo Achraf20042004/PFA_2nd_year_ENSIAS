@@ -1,6 +1,29 @@
 from django.db import models
 from django.conf import settings
 
+MALADIE_TO_DOMAIN = {
+    "pneumonie": "radiologie",
+    "melanome": "dermatologie",
+    "tumeur": "neurologie",
+    "tumeur cerebrale": "neurologie",
+}
+
+BADGE_THRESHOLDS = [
+    (1000, "Maître"),
+    (500, "Expert"),
+    (300, "Diagnosticien"),
+    (100, "Praticien"),
+    (10, "Débutant"),
+]
+
+
+def get_badge_for_score(score: int) -> str | None:
+    """Return the highest badge name the student has earned, or None."""
+    for threshold, name in BADGE_THRESHOLDS:
+        if score >= threshold:
+            return name
+    return None
+
 
 class Badge(models.Model):
     """An achievement badge that students can unlock."""
@@ -36,3 +59,39 @@ class UserBadge(models.Model):
 
     def __str__(self):
         return f"{self.etudiant} — {self.badge}"
+
+
+class StudentDomainScore(models.Model):
+    """Tracks a student's cumulative gamification score per medical domain."""
+
+    DOMAIN_CHOICES = [
+        ("radiologie", "Radiologie"),
+        ("dermatologie", "Dermatologie"),
+        ("neurologie", "Neurologie"),
+    ]
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="domain_scores"
+    )
+    domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES)
+    score = models.IntegerField(default=0)
+    last_session_date = models.DateTimeField(null=True, blank=True)
+    last_penalty_applied_date = models.DateField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("student", "domain")
+
+    def get_badge(self):
+        if self.score >= 1000: return 'Maître'
+        if self.score >= 500: return 'Expert'
+        if self.score >= 300: return 'Diagnosticien'
+        if self.score >= 100: return 'Praticien'
+        if self.score >= 10: return 'Débutant'
+        return None
+
+    @property
+    def badge(self) -> str | None:
+        return self.get_badge()
+
+    def __str__(self):
+        return f"{self.student} — {self.domain} — {self.score}pts"

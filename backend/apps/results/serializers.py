@@ -4,6 +4,7 @@ Serializers for the results app.
 from django.conf import settings
 from rest_framework import serializers
 
+from apps.exercises.models import Exercise
 from apps.results.models import Attempt, ImageResult
 
 
@@ -96,14 +97,31 @@ class FeedbackSerializer(serializers.Serializer):
 # History (/results/me/)
 # ---------------------------------------------------------------------------
 
+_DOMAIN_LABELS = {
+    "pneumonie": "Pneumonie",
+    "melanome": "Mélanome",
+    "tumeur": "Tumeur cérébrale",
+}
+
+
+class ExerciseMiniSerializer(serializers.ModelSerializer):
+    titre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Exercise
+        fields = ["id", "titre", "maladie", "difficulte"]
+
+    def get_titre(self, obj):
+        label = _DOMAIN_LABELS.get(obj.maladie.lower(), obj.maladie.capitalize())
+        return f"{label} — {obj.difficulte.capitalize()}"
+
+
 class AttemptHistorySerializer(serializers.ModelSerializer):
-    exercise_id = serializers.IntegerField(source="exercise.id")
-    maladie = serializers.CharField(source="exercise.maladie")
-    difficulte = serializers.CharField(source="exercise.difficulte")
+    exercise = ExerciseMiniSerializer(read_only=True)
 
     class Meta:
         model = Attempt
-        fields = ["id", "exercise_id", "maladie", "difficulte", "score", "mode", "date", "duree_reelle"]
+        fields = ["id", "exercise", "score", "mode", "date", "duree_reelle"]
 
 
 # ---------------------------------------------------------------------------

@@ -175,6 +175,13 @@ def submit_attempt(
     except Exception:
         pass  # badge failure must never break the submission
 
+    # Award gamification domain points
+    try:
+        from apps.badges.services import award_domain_points
+        award_domain_points(student, attempt)
+    except Exception:
+        pass
+
     return attempt
 
 

@@ -5,6 +5,7 @@ from apps.analytics.views import (
     ETLLogsView,
     ModelMetricsView,
     ProfDashboardView,
+    ProfProfileStatsView,
 )
 
 app_name = "analytics"
@@ -14,4 +15,5 @@ urlpatterns = [
     path("model-metrics/", ModelMetricsView.as_view(), name="model-metrics"),
     path("dashboard/prof/", ProfDashboardView.as_view(), name="dashboard-prof"),
     path("dashboard/admin/", AdminDashboardView.as_view(), name="dashboard-admin"),
+    path("prof/profile-stats/", ProfProfileStatsView.as_view(), name="prof-profile-stats"),
 ]

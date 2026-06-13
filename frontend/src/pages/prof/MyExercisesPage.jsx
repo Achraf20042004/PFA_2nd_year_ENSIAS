@@ -8,13 +8,15 @@ import Modal from '../../components/Modal'
 import { IconBook, IconChart } from '../../components/icons'
 
 const MALADIE_OPTIONS = [
-  { value: 'pneumonie', label: 'Radiologie — Pneumonie' },
-  { value: 'melanome', label: 'Dermatologie — Mélanome' },
+  { value: 'pneumonie', label: 'Pneumonie' },
+  { value: 'melanome',  label: 'Dermatologie — Mélanome' },
+  { value: 'tumeur',    label: 'Neurologie — Tumeur cérébrale' },
 ]
 const DIFFICULTY_OPTIONS = ['facile', 'moyen', 'difficile']
 const DOMAIN_BADGE = {
   pneumonie: 'bg-blue-50 text-blue-700',
-  melanome: 'bg-orange-50 text-orange-700',
+  melanome:  'bg-orange-50 text-orange-700',
+  tumeur:    'bg-violet-50 text-violet-700',
 }
 
 const EMPTY_FORM = {
@@ -74,7 +76,7 @@ function ExerciseForm({ form, onChange, datasets, datasetsLoading }) {
   return (
     <div className="space-y-4">
       <Field label="Titre">
-        <Input value={form.titre} onChange={(e) => set('titre', e.target.value)} placeholder="Ex: Radiologie avancée" />
+        <Input value={form.titre} onChange={(e) => set('titre', e.target.value)} placeholder="Ex: Pneumonie avancée" />
       </Field>
 
       <div className="grid grid-cols-2 gap-4">
@@ -103,9 +105,9 @@ function ExerciseForm({ form, onChange, datasets, datasetsLoading }) {
               <option value="">— Sélectionner un dataset —</option>
               {(datasets?.results ?? datasets ?? [])
                 .filter((d) => d.statut === 'ready')
-                .map((d) => (
+                .map((d, i) => (
                   <option key={d.id} value={d.id}>
-                    {d.maladie} · Dataset #{d.id} · {d.nb_images} images
+                    {d.maladie} · Dataset {i + 1} · {d.nb_images} images
                   </option>
                 ))}
             </>
@@ -298,10 +300,10 @@ export default function MyExercisesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {exercises.map((ex) => (
+              {exercises.map((ex, i) => (
                 <tr key={ex.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-5 py-4">
-                    <p className="text-sm font-semibold text-slate-800">{ex.titre ?? `Exercice #${ex.id}`}</p>
+                    <p className="text-sm font-semibold text-slate-800">{ex.titre ?? `Exercice ${i + 1}`}</p>
                     <p className="text-xs text-slate-400 capitalize mt-0.5">{ex.difficulte} · {ex.exam_config?.nb_images ?? 10} images</p>
                   </td>
                   <td className="px-5 py-4">
@@ -372,7 +374,7 @@ export default function MyExercisesPage() {
       {/* Delete confirm */}
       <Modal open={confirmDelete !== null} onClose={() => setConfirmDelete(null)} title="Supprimer l'exercice">
         <p className="text-sm text-slate-600 mb-4">
-          Êtes-vous sûr de vouloir supprimer <strong>{confirmDelete?.titre ?? `l'exercice #${confirmDelete?.id}`}</strong> ?
+          Êtes-vous sûr de vouloir supprimer <strong>{confirmDelete?.titre ?? 'cet exercice'}</strong> ?
           Cette action est irréversible et supprimera toutes les tentatives associées.
         </p>
         <div className="flex justify-end gap-3">

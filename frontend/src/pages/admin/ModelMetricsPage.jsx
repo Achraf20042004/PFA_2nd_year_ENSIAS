@@ -5,8 +5,8 @@ import { IconAnalytics } from '../../components/icons'
 
 const DOMAIN_META = {
   pneumonie: {
-    label: 'Radiologie',
-    sub: 'Pneumonie',
+    label: 'Pneumonie',
+    sub: 'Radiologie',
     model: 'nickmuchi/vit-finetuned-chest-xray-pneumonia',
     bg: 'bg-blue-50',
     border: 'border-blue-100',
@@ -24,10 +24,10 @@ const DOMAIN_META = {
     text: 'text-orange-700',
     bar: 'bg-orange-500',
   },
-  retinopathie: {
-    label: 'Ophtalmologie',
-    sub: 'Rétinopathie',
-    model: 'gauravlochab/diabetic-retinopathy-vit-base',
+  tumeur: {
+    label: 'Neurologie',
+    sub: 'Tumeur cérébrale',
+    model: 'Devarshi/Brain-Tumor-Classification',
     bg: 'bg-violet-50',
     border: 'border-violet-100',
     dot: 'bg-violet-500',
@@ -78,7 +78,7 @@ function DomainCard({ maladie, metricGroups }) {
                 <p className="text-xs font-medium text-slate-600 capitalize">{m.metric_name}</p>
                 {m.image_id && <p className="text-xs text-slate-400">image #{m.image_id}</p>}
               </div>
-              <MetricBar value={m.metric_value} bar={d.bar} />
+              <MetricBar value={m.avg_confidence} bar={d.bar} />
             </div>
           ))}
         </div>
@@ -95,34 +95,20 @@ export default function ModelMetricsPage() {
 
   const rows = data?.results ?? data ?? []
 
-  // Group by maladie
-  const grouped = {}
-  rows.forEach((m) => {
-    if (!grouped[m.maladie]) grouped[m.maladie] = []
-    grouped[m.maladie].push(m)
-  })
-
-  // Summary stats per domain
-  const summaries = Object.entries(grouped).map(([maladie, metrics]) => {
-    const avgMetrics = {}
-    metrics.forEach((m) => {
-      if (!avgMetrics[m.metric_name]) avgMetrics[m.metric_name] = []
-      avgMetrics[m.metric_name].push(m.metric_value ?? 0)
-    })
-    return {
-      maladie,
-      summaryMetrics: Object.entries(avgMetrics).map(([name, vals]) => ({
-        metric_name: name,
-        metric_value: vals.reduce((a, b) => a + b, 0) / vals.length,
-      })),
-      rawCount: metrics.length,
-    }
-  })
+  // API returns one aggregated row per domain: { maladie, model_id, avg_confidence, avg_latency_ms, sample_count }
+  const summaries = rows.map((m) => ({
+    maladie: m.maladie,
+    summaryMetrics: [
+      { metric_name: 'confiance IA', avg_confidence: m.avg_confidence },
+    ],
+    rawCount: m.sample_count ?? 0,
+  }))
 
   // Add domains with no data
-  const allDomains = ['pneumonie', 'melanome', 'retinopathie']
+  const allDomains = ['pneumonie', 'melanome', 'tumeur']
+  const presentMalades = new Set(rows.map((r) => r.maladie))
   allDomains.forEach((d) => {
-    if (!grouped[d]) summaries.push({ maladie: d, summaryMetrics: [], rawCount: 0 })
+    if (!presentMalades.has(d)) summaries.push({ maladie: d, summaryMetrics: [], rawCount: 0 })
   })
 
   return (
@@ -159,9 +145,10 @@ export default function ModelMetricsPage() {
                 <thead>
                   <tr className="border-b border-slate-100">
                     <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3">Domaine</th>
-                    <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3">Métrique</th>
-                    <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3">Image</th>
-                    <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3 w-48">Valeur</th>
+                    <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3">Modèle</th>
+                    <th className="text-right text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3">Échantillons</th>
+                    <th className="text-right text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3">Latence moy.</th>
+                    <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3 w-48">Confiance moy.</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -175,10 +162,11 @@ export default function ModelMetricsPage() {
                             <span className="text-sm text-slate-700">{d.label ?? m.maladie}</span>
                           </div>
                         </td>
-                        <td className="px-5 py-3 text-sm text-slate-600 capitalize">{m.metric_name}</td>
-                        <td className="px-5 py-3 text-sm text-slate-400 font-mono">{m.image_id != null ? `#${m.image_id}` : '—'}</td>
+                        <td className="px-5 py-3 text-xs text-slate-400 font-mono truncate max-w-[180px]">{m.model_id ?? '—'}</td>
+                        <td className="px-5 py-3 text-sm text-slate-600 text-right">{m.sample_count ?? '—'}</td>
+                        <td className="px-5 py-3 text-sm text-slate-600 text-right">{m.avg_latency_ms != null ? `${m.avg_latency_ms} ms` : '—'}</td>
                         <td className="px-5 py-3">
-                          <MetricBar value={m.metric_value} bar={d.bar ?? 'bg-primary'} />
+                          <MetricBar value={m.avg_confidence} bar={d.bar ?? 'bg-primary'} />
                         </td>
                       </tr>
                     )

@@ -66,5 +66,17 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "email", "role", "etablissement", "avatar", "date_joined"]
+        fields = ["id", "email", "first_name", "last_name", "username", "role", "etablissement", "avatar", "date_joined"]
         read_only_fields = ["id", "email", "role", "date_joined"]
+
+
+class AdminUserSerializer(serializers.ModelSerializer):
+    """Full serializer for admin user management — exposes is_active and role."""
+
+    class Meta:
+        model = User
+        fields = [
+            "id", "email", "first_name", "last_name", "username",
+            "role", "etablissement", "is_active", "date_joined",
+        ]
+        read_only_fields = ["id", "email", "date_joined"]

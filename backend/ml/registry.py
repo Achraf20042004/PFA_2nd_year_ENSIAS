@@ -6,9 +6,9 @@ on first use and cached in ml_cache/ (relative to the backend root). The cache
 directory can be overridden via the ML_CACHE_DIR environment variable.
 
 Fixed models:
-  pneumonie     → nickmuchi/vit-finetuned-chest-xray-pneumonia
-  melanome      → anonymous-german-shepherd/skin-cancer
-  retinopathie  → nickmuchi/vit-finetuned-chest-xray-pneumonia  (placeholder)
+  pneumonie  → nickmuchi/vit-finetuned-chest-xray-pneumonia
+  melanome   → SeyedAli/Melanoma-Classification
+  tumeur     → Devarshi/Brain-Tumor-Classification
 """
 import logging
 import os
@@ -61,13 +61,13 @@ HUGGINGFACE_MODELS: dict[str, dict] = {
             "malignant": "malade",
         },
     },
-    "retinopathie": {
-        # Placeholder: reuses the already-cached pneumonia model until a
-        # reliable ophthalmology model is available on HuggingFace.
-        "model_id": "nickmuchi/vit-finetuned-chest-xray-pneumonia",
+    "tumeur": {
+        "model_id": "Devarshi/Brain-Tumor-Classification",
         "label_map": {
-            "PNEUMONIA": "malade",
-            "NORMAL": "sain",
+            "glioma_tumor": "malade",
+            "meningioma_tumor": "malade",
+            "pituitary_tumor": "malade",
+            "no_tumor": "sain",
         },
     },
 }

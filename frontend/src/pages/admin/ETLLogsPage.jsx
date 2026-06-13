@@ -21,9 +21,9 @@ const STEP_OPTIONS = [
 
 const DOMAIN_OPTIONS = [
   { value: '', label: 'Tous les domaines' },
-  { value: 'pneumonie', label: 'Radiologie' },
+  { value: 'pneumonie', label: 'Pneumonie' },
   { value: 'melanome', label: 'Dermatologie' },
-  { value: 'retinopathie', label: 'Ophtalmologie' },
+  { value: 'tumeur', label: 'Neurologie' },
 ]
 
 const STATUS_STYLE = {

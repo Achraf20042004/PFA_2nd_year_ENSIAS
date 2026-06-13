@@ -7,8 +7,9 @@ import { IconPlay, IconClock, IconChart } from '../components/icons'
 
 const DOMAINS = [
   { value: '', label: 'Tous' },
-  { value: 'pneumonie', label: 'Radiologie', sub: 'Pneumonie', color: 'text-blue-600', bg: 'bg-blue-50', dot: 'bg-blue-500' },
-  { value: 'melanome', label: 'Dermatologie', sub: 'Mélanome', color: 'text-orange-600', bg: 'bg-orange-50', dot: 'bg-orange-500' },
+  { value: 'pneumonie', label: 'Pneumonie',    sub: 'Radiologie',        color: 'text-blue-600',   bg: 'bg-blue-50',   dot: 'bg-blue-500' },
+  { value: 'melanome',  label: 'Dermatologie', sub: 'Mélanome',          color: 'text-orange-600', bg: 'bg-orange-50', dot: 'bg-orange-500' },
+  { value: 'tumeur',    label: 'Neurologie',   sub: 'Tumeur cérébrale',  color: 'text-violet-600', bg: 'bg-violet-50', dot: 'bg-violet-500' },
 ]
 
 const DIFFICULTIES = [
@@ -25,8 +26,9 @@ const DIFFICULTY_STYLE = {
 }
 
 const DOMAIN_META = {
-  pneumonie: { color: 'text-blue-600', bg: 'bg-blue-50', dot: 'bg-blue-500', label: 'Radiologie' },
-  melanome: { color: 'text-orange-600', bg: 'bg-orange-50', dot: 'bg-orange-500', label: 'Dermatologie' },
+  pneumonie: { color: 'text-blue-600',   bg: 'bg-blue-50',   dot: 'bg-blue-500',   label: 'Pneumonie' },
+  melanome:  { color: 'text-orange-600', bg: 'bg-orange-50', dot: 'bg-orange-500', label: 'Dermatologie' },
+  tumeur:    { color: 'text-violet-600', bg: 'bg-violet-50', dot: 'bg-violet-500', label: 'Neurologie' },
 }
 
 function ExerciseCard({ exercise }) {
@@ -60,7 +62,7 @@ function ExerciseCard({ exercise }) {
             {domain.label}
           </p>
           <h3 className="font-heading font-semibold text-slate-900 text-base mb-2 leading-snug">
-            {exercise.titre ?? `Exercice #${exercise.id}`}
+            {exercise.titre ?? `${domain.label} — ${exercise.difficulte ?? 'Entraînement'}`}
           </h3>
           {exercise.description && (
             <p className="text-sm text-slate-500 leading-relaxed line-clamp-2">
@@ -83,7 +85,7 @@ function ExerciseCard({ exercise }) {
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-primary-dark opacity-0 group-hover:opacity-100 transition-opacity">
             <IconPlay className="w-3.5 h-3.5" />
             Démarrer
           </div>
@@ -99,8 +101,8 @@ function DomainTab({ domain, active, onClick }) {
       onClick={onClick}
       className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
         active
-          ? 'bg-primary text-white shadow-sm'
-          : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-300'
+          ? 'bg-primary-dark text-white shadow-sm'
+          : 'bg-white text-slate-600 border border-slate-200 hover:border-primary/30'
       }`}
     >
       {domain.label}
@@ -119,9 +121,7 @@ export default function ExercisesPage() {
     queryFn: () => exercisesApi.list(),
   })
 
-  const allExercises = (data?.results ?? data ?? []).filter(
-    (ex) => ex.maladie !== 'retinopathie'
-  )
+  const allExercises = data?.results ?? data ?? []
 
   const filtered = allExercises.filter((ex) => {
     if (selectedDomain && ex.maladie !== selectedDomain) return false
@@ -144,7 +144,7 @@ export default function ExercisesPage() {
   })
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-8 max-w-6xl mx-auto animate-page">
       {/* Header */}
       <div className="mb-6">
         <h1 className="font-heading text-3xl font-bold text-slate-900 mb-1">Exercices</h1>
@@ -154,7 +154,7 @@ export default function ExercisesPage() {
       </div>
 
       {/* Domain stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-3 lg:grid-cols-3 gap-4 mb-6">
         {DOMAINS.slice(1).map((d) => (
           <button
             key={d.value}

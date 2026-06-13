@@ -30,18 +30,30 @@ class ExamConfigSerializer(serializers.ModelSerializer):
         return value
 
 
+DOMAIN_LABELS = {
+    "pneumonie": "Pneumonie",
+    "melanome": "Mélanome",
+    "tumeur": "Tumeur cérébrale",
+}
+
+
 class ExerciseSerializer(serializers.ModelSerializer):
     """Full representation (read + write for profs)."""
     prof_email = serializers.EmailField(source="prof.email", read_only=True)
     exam_config = ExamConfigSerializer(read_only=True)
+    titre = serializers.SerializerMethodField()
 
     class Meta:
         model = Exercise
         fields = [
-            "id", "maladie", "dataset", "difficulte", "actif",
+            "id", "titre", "maladie", "dataset", "difficulte", "actif",
             "cours", "prof_email", "exam_config", "created_at",
         ]
-        read_only_fields = ["id", "prof_email", "exam_config", "created_at"]
+        read_only_fields = ["id", "titre", "prof_email", "exam_config", "created_at"]
+
+    def get_titre(self, obj):
+        label = DOMAIN_LABELS.get(obj.maladie.lower(), obj.maladie.capitalize())
+        return f"{label} — {obj.difficulte.capitalize()}"
 
     def validate_dataset(self, dataset):
         request = self.context.get("request")
@@ -61,13 +73,19 @@ class ExerciseListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for list views."""
     prof_email = serializers.EmailField(source="prof.email", read_only=True)
     has_exam_config = serializers.SerializerMethodField()
+    titre = serializers.SerializerMethodField()
+    exam_config = ExamConfigSerializer(read_only=True)
 
     class Meta:
         model = Exercise
         fields = [
-            "id", "maladie", "difficulte", "actif",
-            "prof_email", "has_exam_config", "created_at",
+            "id", "titre", "maladie", "difficulte", "actif",
+            "prof_email", "has_exam_config", "exam_config", "created_at",
         ]
+
+    def get_titre(self, obj):
+        label = DOMAIN_LABELS.get(obj.maladie.lower(), obj.maladie.capitalize())
+        return f"{label} — {obj.difficulte.capitalize()}"
 
     def get_has_exam_config(self, obj):
         try:

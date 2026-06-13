@@ -20,6 +20,7 @@ from apps.analytics.services import (
     get_etl_logs,
     get_model_metrics_summary,
     get_prof_dashboard,
+    get_prof_profile_stats,
 )
 
 logger = logging.getLogger(__name__)
@@ -189,6 +190,22 @@ class ProfDashboardView(APIView):
             prof = request.user
 
         data = get_prof_dashboard(prof)
+        return Response(data)
+
+
+class ProfProfileStatsView(APIView):
+    """
+    GET /api/analytics/prof/profile-stats/
+
+    Teaching statistics for the professor profile page.
+    Returns dataset counts, student/attempt aggregates, most active domain,
+    weekly sparkline data, and the 3 most recent datasets.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, _IsProfOrAdmin]
+
+    def get(self, request):
+        data = get_prof_profile_stats(request.user)
         return Response(data)
 
 

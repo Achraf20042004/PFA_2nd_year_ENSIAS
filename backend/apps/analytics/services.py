@@ -130,6 +130,12 @@ def get_prof_dashboard(prof) -> dict:
     from apps.exercises.models import Exercise
     from apps.results.models import Attempt, ImageResult
 
+    DOMAIN_LABELS = {
+        "pneumonie": "Radiologie",
+        "melanome": "Dermatologie",
+        "tumeur": "Neurologie",
+    }
+
     exercises = list(Exercise.objects.filter(prof=prof).order_by("-created_at"))
 
     exercises_data = []
@@ -138,7 +144,7 @@ def get_prof_dashboard(prof) -> dict:
         total = attempts_qs.count()
         agg = attempts_qs.aggregate(avg=Avg("score"))
         avg_score = agg["avg"]
-        student_count = attempts_qs.values("etudiant").distinct().count()
+        nb_students = attempts_qs.values("etudiant").distinct().count()
 
         hardest = list(
             ImageResult.objects.filter(attempt__exercise=ex, correct=False)
@@ -147,15 +153,17 @@ def get_prof_dashboard(prof) -> dict:
             .order_by("-error_count")[:5]
         )
 
+        domain_label = DOMAIN_LABELS.get(ex.maladie.lower(), ex.maladie.capitalize())
         exercises_data.append(
             {
-                "exercise_id": ex.id,
+                "id": ex.id,
+                "titre": f"{domain_label} — {ex.difficulte.capitalize()}",
                 "maladie": ex.maladie,
                 "difficulte": ex.difficulte,
                 "actif": ex.actif,
-                "total_attempts": total,
-                "avg_score": round(avg_score, 3) if avg_score is not None else None,
-                "student_count": student_count,
+                "nb_attempts": total,
+                "avg_score": round(avg_score * 100, 1) if avg_score is not None else None,
+                "nb_students": nb_students,
                 "hardest_images": [
                     {
                         "image_id": r["image_id"],
@@ -170,17 +178,99 @@ def get_prof_dashboard(prof) -> dict:
             }
         )
 
+    # Sort by activity: most-attempted exercise first so the default selection is meaningful
+    exercises_data.sort(key=lambda e: e["nb_attempts"], reverse=True)
+
+    # Top-level aggregates expected by the prof dashboard
+    all_attempts = Attempt.objects.filter(exercise__in=exercises)
+    total_attempts = all_attempts.count()
+    total_students = all_attempts.values("etudiant").distinct().count()
+    global_avg = all_attempts.aggregate(avg=Avg("score"))["avg"]
+
     # Confidence trends from SQLite — scoped to this prof's disease domains
-    malades = list(
-        {ex.maladie.lower() for ex in exercises}
-    )
+    malades = list({ex.maladie.lower() for ex in exercises})
     confidence_trends = get_model_metrics_summary(malades=malades) if malades else []
 
     return {
         "prof_id": prof.id,
         "prof_email": prof.email,
         "exercises": exercises_data,
+        "total_students": total_students,
+        "total_attempts": total_attempts,
+        "avg_score": round(global_avg * 100, 1) if global_avg is not None else None,
         "confidence_trends": confidence_trends,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Prof profile stats
+# ---------------------------------------------------------------------------
+
+
+def get_prof_profile_stats(prof) -> dict:
+    """
+    Teaching statistics for the professor profile page.
+
+    Returns dataset counts, student/attempt aggregates, most active domain,
+    weekly attempt sparkline data, and the 3 most recent datasets.
+    """
+    from datetime import timedelta
+
+    from django.db.models import Avg, Count
+    from django.utils import timezone
+
+    from apps.datasets.models import Dataset
+    from apps.exercises.models import Exercise
+    from apps.results.models import Attempt
+
+    exercises = Exercise.objects.filter(prof=prof)
+    datasets = Dataset.objects.filter(prof=prof)
+    all_attempts = Attempt.objects.filter(exercise__in=exercises)
+
+    total_datasets = datasets.count()
+    total_students = all_attempts.values("etudiant").distinct().count()
+    total_attempts_count = all_attempts.count()
+    avg_raw = all_attempts.aggregate(avg=Avg("score"))["avg"]
+    avg_score = round(avg_raw * 100, 1) if avg_raw is not None else None
+
+    # Most active domain (by attempt count)
+    domain_rows = list(
+        all_attempts.values("exercise__maladie")
+        .annotate(cnt=Count("id"))
+        .order_by("-cnt")
+    )
+    top_domain = domain_rows[0]["exercise__maladie"] if domain_rows else None
+
+    # Weekly sparkline — last 8 complete weeks
+    now = timezone.now()
+    weekly_attempts = []
+    for i in range(7, -1, -1):
+        week_start = now - timedelta(weeks=i + 1)
+        week_end = now - timedelta(weeks=i)
+        count = all_attempts.filter(date__gte=week_start, date__lt=week_end).count()
+        label = f"S{(now - timedelta(weeks=i)).isocalendar()[1]}"
+        weekly_attempts.append({"week": label, "count": count})
+
+    # 3 most recent datasets
+    recent_datasets = [
+        {
+            "id": d.id,
+            "maladie": d.maladie,
+            "statut": d.statut,
+            "nb_images": d.nb_images,
+            "created_at": d.created_at.isoformat(),
+        }
+        for d in datasets.order_by("-created_at")[:3]
+    ]
+
+    return {
+        "total_datasets": total_datasets,
+        "total_students": total_students,
+        "total_attempts": total_attempts_count,
+        "avg_score": avg_score,
+        "top_domain": top_domain,
+        "weekly_attempts": weekly_attempts,
+        "recent_datasets": recent_datasets,
     }
 
 
@@ -201,6 +291,7 @@ def get_admin_dashboard() -> dict:
     from django.utils import timezone
 
     from apps.analytics.models import ETLLog
+    from apps.datasets.models import Dataset
     from apps.exercises.models import Exercise
     from apps.results.models import Attempt
 
@@ -208,58 +299,74 @@ def get_admin_dashboard() -> dict:
 
     # ---- User counts (PostgreSQL) ----------------------------------------
     role_counts = dict(User.objects.values_list("role").annotate(n=Count("id")))
+    total_admins   = role_counts.get("admin", 0)
+    total_profs    = role_counts.get("prof", 0)
+    total_students = role_counts.get("etudiant", 0)
+    total_users    = total_admins + total_profs + total_students
 
-    # ---- Per-domain stats (PostgreSQL) ------------------------------------
-    domain_rows = list(
-        Attempt.objects.values("exercise__maladie")
-        .annotate(total_attempts=Count("id"), avg_score=Avg("score"))
-        .order_by("exercise__maladie")
+    # ---- Global attempt stats (PostgreSQL) --------------------------------
+    total_attempts = Attempt.objects.count()
+    global_avg_raw = Attempt.objects.aggregate(avg=Avg("score"))["avg"]
+    avg_score = round(global_avg_raw * 100, 1) if global_avg_raw is not None else None
+
+    # ---- ETL health (SQLite) — total, success, error counts ---------------
+    etl_qs      = ETLLog.objects.using("analytics")
+    etl_total   = etl_qs.count()
+    etl_success = etl_qs.filter(status="success").count()
+    etl_error   = etl_qs.filter(status="error").count()
+
+    # ---- Recent ETL logs (last 10, with maladie resolved via dataset_id) --
+    recent_raw = list(
+        etl_qs.order_by("-created_at").values(
+            "id", "pipeline_run_id", "dataset_id", "step",
+            "status", "message", "duration_ms", "created_at",
+        )[:10]
     )
+    # Build dataset_id → maladie map from PostgreSQL to avoid cross-DB join
+    ds_ids = list({r["dataset_id"] for r in recent_raw if r["dataset_id"]})
+    maladie_map = dict(
+        Dataset.objects.filter(id__in=ds_ids).values_list("id", "maladie")
+    ) if ds_ids else {}
+    recent_etl_logs = [
+        {
+            "id": r["id"],
+            "dataset_id": r["dataset_id"],
+            "step": r["step"],
+            "status": r["status"],
+            "message": r["message"],
+            "duration_ms": r["duration_ms"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "maladie": maladie_map.get(r["dataset_id"]),
+        }
+        for r in recent_raw
+    ]
 
-    # ---- Per-domain ML metrics (SQLite) -----------------------------------
-    metrics_by_maladie = {
-        row["maladie"].lower(): row for row in get_model_metrics_summary()
-    }
-
-    domains = []
-    for row in domain_rows:
-        maladie = row["exercise__maladie"]
-        ml = metrics_by_maladie.get(maladie.lower(), {})
-        domains.append(
-            {
-                "maladie": maladie,
-                "total_attempts": row["total_attempts"],
-                "avg_score": round(row["avg_score"], 3)
-                if row["avg_score"] is not None
-                else None,
-                "avg_confidence": ml.get("avg_confidence"),
-                "avg_latency_ms": ml.get("avg_latency_ms"),
-            }
-        )
-
-    # ---- ETL health (SQLite) ----------------------------------------------
-    cutoff_24h = timezone.now() - timedelta(hours=24)
-    etl_total = ETLLog.objects.using("analytics").count()
-    etl_activity_24h = ETLLog.objects.using("analytics").filter(
-        created_at__gte=cutoff_24h
-    ).count()
-    etl_errors_24h = ETLLog.objects.using("analytics").filter(
-        status="error", created_at__gte=cutoff_24h
-    ).count()
+    # ---- AI model metrics (SQLite) — avg confidence per domain ------------
+    metrics_summary = get_model_metrics_summary()
+    model_metrics = [
+        {
+            "maladie": row["maladie"],
+            "model_id": row["model_id"],
+            "metric_value": row["avg_confidence"],   # 0-1 range, frontend multiplies by 100
+            "avg_latency_ms": row["avg_latency_ms"],
+            "sample_count": row["sample_count"],
+        }
+        for row in metrics_summary
+    ]
 
     return {
-        "users": {
-            "admin": role_counts.get("admin", 0),
-            "prof": role_counts.get("prof", 0),
-            "etudiant": role_counts.get("etudiant", 0),
-            "total": sum(role_counts.values()),
-        },
+        "total_users":    total_users,
+        "total_admins":   total_admins,
+        "total_profs":    total_profs,
+        "total_students": total_students,
         "total_exercises": Exercise.objects.count(),
-        "total_attempts": Attempt.objects.count(),
-        "domains": domains,
+        "total_attempts": total_attempts,
+        "avg_score": avg_score,
         "etl_health": {
-            "total_runs": etl_total,
-            "recent_errors_24h": etl_errors_24h,
-            "activity_24h": etl_activity_24h,
+            "total":   etl_total,
+            "success": etl_success,
+            "error":   etl_error,
         },
+        "model_metrics":   model_metrics,
+        "recent_etl_logs": recent_etl_logs,
     }

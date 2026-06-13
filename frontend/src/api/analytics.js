@@ -7,5 +7,7 @@ export const analyticsApi = {
 
   profDashboard: (params) => client.get('/analytics/dashboard/prof/', { params }).then((r) => r.data),
 
+  profProfileStats: () => client.get('/analytics/prof/profile-stats/').then((r) => r.data),
+
   adminDashboard: () => client.get('/analytics/dashboard/admin/').then((r) => r.data),
 }

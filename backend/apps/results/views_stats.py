@@ -1,6 +1,8 @@
 """
 Views for /api/results/ — student history and professor exercise statistics.
 """
+from datetime import date, timedelta
+
 from django.db.models import Avg
 from rest_framework import permissions
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -18,7 +20,8 @@ class StudentHistoryView(APIView):
     GET /api/results/me/
 
     Returns the authenticated student's full attempt history with
-    aggregate statistics (total attempts, average score, progression).
+    aggregate statistics (total attempts, average score, streak, results).
+    Field names match the frontend contract: count, average_score, streak, results.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -29,12 +32,21 @@ class StudentHistoryView(APIView):
             .order_by("-date")
         )
 
-        avg_score = attempts.aggregate(avg=Avg("score"))["avg"]
+        avg_raw = attempts.aggregate(avg=Avg("score"))["avg"]
+
+        # Consecutive-day streak ending today
+        attempt_dates = set(attempts.values_list("date__date", flat=True))
+        streak = 0
+        current = date.today()
+        while current in attempt_dates:
+            streak += 1
+            current -= timedelta(days=1)
 
         return Response({
-            "total_attempts": attempts.count(),
-            "avg_score": round(avg_score, 3) if avg_score is not None else None,
-            "progression": AttemptHistorySerializer(attempts, many=True).data,
+            "count": attempts.count(),
+            "average_score": round(avg_raw * 100, 1) if avg_raw is not None else None,
+            "streak": streak,
+            "results": AttemptHistorySerializer(attempts, many=True).data,
         })
 
 

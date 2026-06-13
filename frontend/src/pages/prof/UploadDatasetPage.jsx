@@ -8,8 +8,8 @@ import { IconDatabase, IconCheck, IconX } from '../../components/icons'
 const DOMAINS = [
   {
     value: 'pneumonie',
-    label: 'Radiologie',
-    sub: 'Pneumonie',
+    label: 'Pneumonie',
+    sub: 'Radiologie',
     model: 'nickmuchi/vit-finetuned-chest-xray-pneumonia',
     format: '256×256 px, niveaux de gris ou RGB',
     bg: 'bg-blue-50',
@@ -27,6 +27,17 @@ const DOMAINS = [
     border: 'border-orange-200',
     text: 'text-orange-700',
     activeBg: 'bg-orange-600',
+  },
+  {
+    value: 'tumeur',
+    label: 'Neurologie',
+    sub: 'Tumeur cérébrale',
+    model: 'Devarshi/Brain-Tumor-Classification',
+    format: '224×224 px, RGB (IRM)',
+    bg: 'bg-violet-50',
+    border: 'border-violet-200',
+    text: 'text-violet-700',
+    activeBg: 'bg-violet-600',
   },
 ]
 
@@ -223,7 +234,7 @@ export default function UploadDatasetPage() {
               <p className="text-sm font-semibold text-slate-800">
                 {statusData?.statut === 'ready' ? 'Dataset prêt !' : statusData?.statut === 'error' ? 'Erreur de traitement' : 'Pipeline ETL en cours...'}
               </p>
-              <p className="text-xs text-slate-500 mt-0.5">Dataset #{uploadedId} · {statusData?.statut ?? 'processing'}</p>
+              <p className="text-xs text-slate-500 mt-0.5">Dataset {uploadedId} · {statusData?.statut ?? 'processing'}</p>
             </div>
           </div>
         </div>

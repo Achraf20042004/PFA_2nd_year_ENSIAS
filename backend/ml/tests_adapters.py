@@ -7,15 +7,15 @@ import pytest
 from PIL import Image
 
 from ml.adapters import (
+    BrainAdapter,
     ChestAdapter,
-    FundusAdapter,
     SkinAdapter,
     get_adapter,
 )
 
 
-def _make_image_bytes(width=100, height=100, mode="RGB") -> bytes:
-    """Create a minimal in-memory JPEG image."""
+def _make_image_bytes(width=200, height=150, mode="RGB") -> bytes:
+    """Create a minimal in-memory JPEG image (non-square to test center crop)."""
     color = 128 if mode == "L" else (128, 64, 32)
     img = Image.new(mode, (width, height), color=color)
     buf = io.BytesIO()
@@ -30,7 +30,6 @@ class TestChestAdapter:
         assert result.size == (256, 256)
 
     def test_output_mode_rgb(self):
-        # Input is greyscale; adapter must convert to RGB
         adapter = ChestAdapter()
         grey_bytes = _make_image_bytes(mode="L")
         result = adapter.preprocess(grey_bytes)
@@ -40,6 +39,11 @@ class TestChestAdapter:
         adapter = ChestAdapter()
         result = adapter.preprocess(_make_image_bytes())
         assert isinstance(result, Image.Image)
+
+    def test_non_square_input_produces_square_output(self):
+        adapter = ChestAdapter()
+        result = adapter.preprocess(_make_image_bytes(width=300, height=150))
+        assert result.size == (256, 256)
 
 
 class TestSkinAdapter:
@@ -53,17 +57,27 @@ class TestSkinAdapter:
         result = adapter.preprocess(_make_image_bytes())
         assert result.mode == "RGB"
 
+    def test_non_square_input_produces_square_output(self):
+        adapter = SkinAdapter()
+        result = adapter.preprocess(_make_image_bytes(width=400, height=300))
+        assert result.size == (224, 224)
 
-class TestFundusAdapter:
+
+class TestBrainAdapter:
     def test_output_size(self):
-        adapter = FundusAdapter()
+        adapter = BrainAdapter()
         result = adapter.preprocess(_make_image_bytes())
-        assert result.size == (299, 299)
+        assert result.size == (224, 224)
 
     def test_output_mode_rgb(self):
-        adapter = FundusAdapter()
+        adapter = BrainAdapter()
         result = adapter.preprocess(_make_image_bytes())
         assert result.mode == "RGB"
+
+    def test_non_square_input_produces_square_output(self):
+        adapter = BrainAdapter()
+        result = adapter.preprocess(_make_image_bytes(width=256, height=192))
+        assert result.size == (224, 224)
 
 
 class TestGetAdapter:
@@ -75,14 +89,14 @@ class TestGetAdapter:
         adapter = get_adapter("melanome")
         assert isinstance(adapter, SkinAdapter)
 
-    def test_retinopathie(self):
-        adapter = get_adapter("retinopathie")
-        assert isinstance(adapter, FundusAdapter)
+    def test_tumeur(self):
+        adapter = get_adapter("tumeur")
+        assert isinstance(adapter, BrainAdapter)
 
     def test_case_insensitive(self):
         assert isinstance(get_adapter("Pneumonie"), ChestAdapter)
         assert isinstance(get_adapter("MELANOME"), SkinAdapter)
-        assert isinstance(get_adapter("  retinopathie  "), FundusAdapter)
+        assert isinstance(get_adapter("  tumeur  "), BrainAdapter)
 
     def test_unknown_disease_raises(self):
         with pytest.raises(ValueError, match="No preprocessing adapter"):

@@ -6,9 +6,9 @@ import LoadingSpinner from '../../components/LoadingSpinner'
 import { IconPlay, IconClock, IconCheck, IconLock } from '../../components/icons'
 
 const DOMAIN_META = {
-  pneumonie: { label: 'Radiologie', bg: 'bg-blue-50', dot: 'bg-blue-500', text: 'text-blue-700' },
+  pneumonie: { label: 'Pneumonie', bg: 'bg-blue-50', dot: 'bg-blue-500', text: 'text-blue-700' },
   melanome: { label: 'Dermatologie', bg: 'bg-orange-50', dot: 'bg-orange-500', text: 'text-orange-700' },
-  retinopathie: { label: 'Ophtalmologie', bg: 'bg-violet-50', dot: 'bg-violet-500', text: 'text-violet-700' },
+  tumeur: { label: 'Neurologie', bg: 'bg-violet-50', dot: 'bg-violet-500', text: 'text-violet-700' },
 }
 
 function countdown(deadline) {
@@ -49,7 +49,7 @@ function ExamCard({ exercise, attempts }) {
 
       <div className="p-5">
         <h3 className="font-heading font-semibold text-slate-900 text-base mb-3">
-          {exercise.titre ?? `Examen #${exercise.id}`}
+          {exercise.titre ?? `Examen — ${domain.label}`}
         </h3>
 
         {/* Meta grid */}

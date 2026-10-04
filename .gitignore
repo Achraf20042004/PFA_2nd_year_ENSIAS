@@ -1,3 +1,32 @@
 backend/ml_cache/
 backend/ml_cache/
 backend/ml_cache/
+
+# Secrets (use .env.example as template)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+coverage.xml
+
+# Django runtime artifacts
+backend/staticfiles/
+backend/media/
+backend/analytics_db/
+*.db
+*.sqlite3
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/

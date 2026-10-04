@@ -21,7 +21,7 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["HF_DATASETS_OFFLINE"] = "1"
 
-from PIL import Image
+from PIL import Image  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

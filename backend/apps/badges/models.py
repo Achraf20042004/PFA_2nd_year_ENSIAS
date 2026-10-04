@@ -82,12 +82,7 @@ class StudentDomainScore(models.Model):
         unique_together = ("student", "domain")
 
     def get_badge(self):
-        if self.score >= 1000: return 'Maître'
-        if self.score >= 500: return 'Expert'
-        if self.score >= 300: return 'Diagnosticien'
-        if self.score >= 100: return 'Praticien'
-        if self.score >= 10: return 'Débutant'
-        return None
+        return get_badge_for_score(self.score)
 
     @property
     def badge(self) -> str | None:

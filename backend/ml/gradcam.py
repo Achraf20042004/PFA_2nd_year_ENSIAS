@@ -46,7 +46,7 @@ def generate_heatmap(maladie: str, image_bytes: bytes) -> bytes:
         ImportError: If transformers / torch are not installed.
         ValueError:  If no adapter is registered for the given disease.
     """
-    import torch
+    import torch  # noqa: F401
     from ml.adapters import get_adapter
     from ml.registry import get_pipeline
 
@@ -131,7 +131,7 @@ def _gradient_saliency(model, inputs) -> np.ndarray:
     Compute input × gradient saliency map. Works for any differentiable model.
     Returns a 2-D float32 array (H_in, W_in) — the input spatial dimensions.
     """
-    import torch
+    import torch  # noqa: F401
 
     pixel_values = inputs["pixel_values"].clone().requires_grad_(True)
     modified_inputs = {**inputs, "pixel_values": pixel_values}

@@ -10,7 +10,7 @@ numpy and torch are required; tests are skipped automatically when absent.
 """
 import io
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from PIL import Image
 
 np = pytest.importorskip("numpy", reason="numpy required for gradcam tests")

@@ -200,6 +200,7 @@ class TestModelMetricModel:
 
 class TestETLLogsView:
     URL = "/api/analytics/etl-logs/"
+
     def test_admin_can_access(self, db, admin_user):
         make_etl_log("r1", 1)
         resp = auth_client(admin_user).get(self.URL)
@@ -281,6 +282,7 @@ class TestETLLogsView:
 
 class TestModelMetricsView:
     URL = "/api/analytics/model-metrics/"
+
     def test_admin_can_access(self, db, admin_user):
         resp = auth_client(admin_user).get(self.URL)
         assert resp.status_code == 200
@@ -392,31 +394,31 @@ class TestProfDashboardView:
 
     def test_exercises_list_contains_own_exercises(self, db, prof, exercise):
         resp = auth_client(prof).get(self.URL)
-        ids = [e["exercise_id"] for e in resp.json()["exercises"]]
+        ids = [e["id"] for e in resp.json()["exercises"]]
         assert exercise.id in ids
 
     def test_other_prof_exercises_not_visible(self, db, prof, other_prof, exercise):
         # exercise belongs to prof; other_prof should not see it
         resp = auth_client(other_prof).get(self.URL)
-        ids = [e["exercise_id"] for e in resp.json()["exercises"]]
+        ids = [e["id"] for e in resp.json()["exercises"]]
         assert exercise.id not in ids
 
     def test_exercise_fields(self, db, prof, exercise):
         resp = auth_client(prof).get(self.URL)
         ex_data = resp.json()["exercises"][0]
-        for field in ("exercise_id", "maladie", "difficulte", "actif",
-                      "total_attempts", "avg_score", "student_count", "hardest_images"):
+        for field in ("id", "titre", "maladie", "difficulte", "actif",
+                      "nb_attempts", "avg_score", "nb_students", "hardest_images"):
             assert field in ex_data, f"missing field: {field}"
 
     def test_total_attempts_counts_correctly(self, db, prof, exercise, attempt):
         resp = auth_client(prof).get(self.URL)
-        ex_data = next(e for e in resp.json()["exercises"] if e["exercise_id"] == exercise.id)
-        assert ex_data["total_attempts"] == 1
+        ex_data = next(e for e in resp.json()["exercises"] if e["id"] == exercise.id)
+        assert ex_data["nb_attempts"] == 1
 
     def test_student_count_is_correct(self, db, prof, exercise, attempt):
         resp = auth_client(prof).get(self.URL)
-        ex_data = next(e for e in resp.json()["exercises"] if e["exercise_id"] == exercise.id)
-        assert ex_data["student_count"] == 1
+        ex_data = next(e for e in resp.json()["exercises"] if e["id"] == exercise.id)
+        assert ex_data["nb_students"] == 1
 
     def test_hardest_images_is_list(self, db, prof, exercise):
         resp = auth_client(prof).get(self.URL)
@@ -437,13 +439,20 @@ class TestProfDashboardView:
 
     def test_avg_score_correct(self, db, prof, exercise, attempt):
         resp = auth_client(prof).get(self.URL)
-        ex_data = next(e for e in resp.json()["exercises"] if e["exercise_id"] == exercise.id)
-        assert ex_data["avg_score"] == pytest.approx(1.0, abs=0.01)
+        data = resp.json()
+        ex_data = next(e for e in data["exercises"] if e["id"] == exercise.id)
+        assert ex_data["avg_score"] == pytest.approx(100.0, abs=0.1)
+        assert data["avg_score"] == pytest.approx(100.0, abs=0.1)
 
     def test_avg_score_none_when_no_attempts(self, db, prof, exercise):
         resp = auth_client(prof).get(self.URL)
-        ex_data = next(e for e in resp.json()["exercises"] if e["exercise_id"] == exercise.id)
+        ex_data = next(e for e in resp.json()["exercises"] if e["id"] == exercise.id)
         assert ex_data["avg_score"] is None
+
+    def test_global_aggregates(self, db, prof, exercise, attempt):
+        data = auth_client(prof).get(self.URL).json()
+        assert data["total_attempts"] == 1
+        assert data["total_students"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -453,6 +462,7 @@ class TestProfDashboardView:
 
 class TestAdminDashboardView:
     URL = "/api/analytics/dashboard/admin/"
+
     def test_admin_can_access(self, db, admin_user):
         resp = auth_client(admin_user).get(self.URL)
         assert resp.status_code == 200
@@ -470,21 +480,18 @@ class TestAdminDashboardView:
         assert resp.status_code == 401
 
     def test_response_structure(self, db, admin_user):
-        resp = auth_client(admin_user).get(self.URL)
-        data = resp.json()
-        assert "users" in data
-        assert "total_exercises" in data
-        assert "total_attempts" in data
-        assert "domains" in data
-        assert "etl_health" in data
+        data = auth_client(admin_user).get(self.URL).json()
+        for field in ("total_users", "total_admins", "total_profs", "total_students",
+                      "total_exercises", "total_attempts", "avg_score",
+                      "etl_health", "model_metrics", "recent_etl_logs"):
+            assert field in data, f"missing field: {field}"
 
     def test_users_block_counts_roles(self, db, admin_user, prof, student):
-        resp = auth_client(admin_user).get(self.URL)
-        users = resp.json()["users"]
-        assert users["admin"] >= 1
-        assert users["prof"] >= 1
-        assert users["etudiant"] >= 1
-        assert users["total"] == users["admin"] + users["prof"] + users["etudiant"]
+        data = auth_client(admin_user).get(self.URL).json()
+        assert data["total_admins"] >= 1
+        assert data["total_profs"] >= 1
+        assert data["total_students"] >= 1
+        assert data["total_users"] == data["total_admins"] + data["total_profs"] + data["total_students"]
 
     def test_total_exercises_counts(self, db, admin_user, exercise):
         resp = auth_client(admin_user).get(self.URL)
@@ -494,54 +501,37 @@ class TestAdminDashboardView:
         resp = auth_client(admin_user).get(self.URL)
         assert resp.json()["total_attempts"] >= 1
 
-    def test_domains_is_list(self, db, admin_user):
+    def test_avg_score_is_correct(self, db, admin_user, attempt):
         resp = auth_client(admin_user).get(self.URL)
-        assert isinstance(resp.json()["domains"], list)
+        assert resp.json()["avg_score"] == pytest.approx(100.0, abs=0.1)
 
-    def test_domain_entry_fields(self, db, admin_user, attempt):
+    def test_model_metrics_is_list(self, db, admin_user):
         resp = auth_client(admin_user).get(self.URL)
-        domain_entry = resp.json()["domains"][0]
-        for field in ("maladie", "total_attempts", "avg_score",
-                      "avg_confidence", "avg_latency_ms"):
-            assert field in domain_entry, f"missing field: {field}"
+        assert isinstance(resp.json()["model_metrics"], list)
 
-    def test_domain_avg_score_is_correct(self, db, admin_user, attempt):
-        resp = auth_client(admin_user).get(self.URL)
-        domain = next(
-            d for d in resp.json()["domains"] if d["maladie"] == "pneumonie"
-        )
-        assert domain["avg_score"] == pytest.approx(1.0, abs=0.01)
-
-    def test_domain_ml_confidence_from_sqlite(self, db, admin_user, attempt):
+    def test_model_metrics_entry_from_sqlite(self, db, admin_user):
         make_metric("pneumonie", "confidence", 0.91)
+        make_metric("pneumonie", "latency_ms", 120)
         resp = auth_client(admin_user).get(self.URL)
-        domain = next(
-            (d for d in resp.json()["domains"] if d["maladie"].lower() == "pneumonie"),
-            None,
-        )
-        assert domain is not None
-        assert domain["avg_confidence"] == pytest.approx(0.91, abs=0.01)
+        entry = next(m for m in resp.json()["model_metrics"] if m["maladie"] == "pneumonie")
+        for field in ("maladie", "model_id", "metric_value", "avg_latency_ms", "sample_count"):
+            assert field in entry, f"missing field: {field}"
+        assert entry["metric_value"] == pytest.approx(0.91, abs=0.01)
+        assert entry["avg_latency_ms"] == pytest.approx(120.0, abs=1.0)
 
     def test_etl_health_block_structure(self, db, admin_user):
-        resp = auth_client(admin_user).get(self.URL)
-        etl = resp.json()["etl_health"]
-        assert "total_runs" in etl
-        assert "recent_errors_24h" in etl
-        assert "activity_24h" in etl
+        etl = auth_client(admin_user).get(self.URL).json()["etl_health"]
+        assert set(etl) == {"total", "success", "error"}
 
     def test_etl_health_counts_logs(self, db, admin_user):
         make_etl_log("r1", 1, status="success")
         make_etl_log("r2", 2, status="error")
-        resp = auth_client(admin_user).get(self.URL)
-        etl = resp.json()["etl_health"]
-        assert etl["total_runs"] >= 2
+        data = auth_client(admin_user).get(self.URL).json()
+        assert data["etl_health"] == {"total": 2, "success": 1, "error": 1}
+        assert len(data["recent_etl_logs"]) == 2
 
-    def test_etl_health_recent_errors_counted(self, db, admin_user):
-        make_etl_log("r-err", 1, status="error")
-        resp = auth_client(admin_user).get(self.URL)
-        assert resp.json()["etl_health"]["recent_errors_24h"] >= 1
-
-    def test_no_domains_when_no_attempts(self, db, admin_user):
-        resp = auth_client(admin_user).get(self.URL)
-        assert resp.json()["domains"] == []
-        assert resp.json()["total_attempts"] == 0
+    def test_empty_platform(self, db, admin_user):
+        data = auth_client(admin_user).get(self.URL).json()
+        assert data["model_metrics"] == []
+        assert data["total_attempts"] == 0
+        assert data["avg_score"] is None

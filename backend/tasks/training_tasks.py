@@ -166,7 +166,6 @@ def process_dataset_zip(self, dataset_id: int):
         from botocore.client import Config as BotocoreConfig
         from django.conf import settings
 
-        from apps.datasets.models import Image
         from ml.adapters import get_adapter
         from ml.registry import predict
 

@@ -248,10 +248,10 @@ STORAGES = {
 MINIO_PUBLIC_URL = os.getenv("MINIO_PUBLIC_URL", "http://localhost:9000")
 
 # Exposed as top-level settings so tasks can use settings.MINIO_* directly
-MINIO_ENDPOINT   = os.getenv("MINIO_ENDPOINT",   "localhost:9000")
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY",  "minioadmin")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY",  "minioadmin")
-MINIO_BUCKET     = os.getenv("MINIO_BUCKET",      "medtrain")
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "medtrain")
 
 # MLflow
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")

@@ -38,7 +38,7 @@ def _center_crop_square(img: Image.Image) -> Image.Image:
     w, h = img.size
     side = min(w, h)
     left = (w - side) // 2
-    top  = (h - side) // 2
+    top = (h - side) // 2
     return img.crop((left, top, left + side, top + side))
 
 

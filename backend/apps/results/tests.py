@@ -171,7 +171,6 @@ class TestSubmitAttemptScore:
         """When inference succeeds, reponse_modele / ml_prediction use the ML result."""
         from unittest.mock import patch
 
-        fake_result = {"label": "sain", "confidence": 0.87, "raw_label": "NORMAL"}
         with patch("apps.results.services._run_ml_inference", return_value=("sain", 0.87)):
             answers = [{"image_id": images[0].id, "reponse_etudiant": "malade"}]
             attempt = submit_attempt(student, exercise, answers, 30, "practice")
@@ -420,24 +419,26 @@ class TestStudentHistoryView:
         resp = auth_client(student).get(self.URL)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total_attempts"] == 0
-        assert data["avg_score"] is None
-        assert data["progression"] == []
+        assert data["count"] == 0
+        assert data["average_score"] is None
+        assert data["streak"] == 0
+        assert data["results"] == []
 
     def test_history_with_attempts(self, db, student, exercise, images):
         answers = [{"image_id": img.id, "reponse_etudiant": img.label} for img in images]
         submit_attempt(student, exercise, answers, 60, "practice")
         resp = auth_client(student).get(self.URL)
         data = resp.json()
-        assert data["total_attempts"] == 1
-        assert data["avg_score"] == pytest.approx(1.0, abs=0.001)
-        assert len(data["progression"]) == 1
+        assert data["count"] == 1
+        assert data["average_score"] == pytest.approx(100.0, abs=0.1)
+        assert data["streak"] == 1
+        assert len(data["results"]) == 1
 
     def test_history_only_own_attempts(self, db, student, other_student, exercise, images):
         answers = [{"image_id": img.id, "reponse_etudiant": img.label} for img in images]
         submit_attempt(other_student, exercise, answers, 60, "practice")
         resp = auth_client(student).get(self.URL)
-        assert resp.json()["total_attempts"] == 0
+        assert resp.json()["count"] == 0
 
     def test_avg_score_across_multiple(self, db, student, exercise, images):
         flip = {"malade": "sain", "sain": "malade"}
@@ -447,16 +448,18 @@ class TestStudentHistoryView:
         submit_attempt(student, exercise, all_wrong, 60, "practice")
         resp = auth_client(student).get(self.URL)
         data = resp.json()
-        assert data["total_attempts"] == 2
-        assert data["avg_score"] == pytest.approx(0.5, abs=0.001)
+        assert data["count"] == 2
+        assert data["average_score"] == pytest.approx(50.0, abs=0.1)
 
     def test_progression_fields(self, db, student, exercise, images):
         answers = [{"image_id": img.id, "reponse_etudiant": img.label} for img in images]
         submit_attempt(student, exercise, answers, 60, "practice")
         resp = auth_client(student).get(self.URL)
-        entry = resp.json()["progression"][0]
-        for field in ("id", "exercise_id", "maladie", "difficulte", "score", "mode", "date", "duree_reelle"):
+        entry = resp.json()["results"][0]
+        for field in ("id", "exercise", "score", "mode", "date", "duree_reelle"):
             assert field in entry
+        for field in ("id", "titre", "maladie", "difficulte"):
+            assert field in entry["exercise"]
 
     def test_unauthenticated_blocked(self, db):
         resp = APIClient().get(self.URL)

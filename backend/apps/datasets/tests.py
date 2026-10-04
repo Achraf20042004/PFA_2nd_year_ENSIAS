@@ -12,6 +12,7 @@ import io
 import zipfile
 
 import pytest
+from PIL import Image as PILImage
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
@@ -35,22 +36,47 @@ UPLOAD_URL = "/api/datasets/upload/"
 def make_zip(malade_count=5, sain_count=5,
              extra_files=None, bad_extension_in=None):
     buf = io.BytesIO()
-    fake_jpg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
     with zipfile.ZipFile(buf, "w") as zf:
         for i in range(malade_count):
             ext = ".pdf" if bad_extension_in == "malade" and i == 0 else ".jpg"
-            zf.writestr(f"malade/img_{i}{ext}", fake_jpg)
+            zf.writestr(f"malade/img_{i}{ext}", fake_jpg("malade"))
         for i in range(sain_count):
             ext = ".pdf" if bad_extension_in == "sain" and i == 0 else ".jpg"
-            zf.writestr(f"sain/img_{i}{ext}", fake_jpg)
+            zf.writestr(f"sain/img_{i}{ext}", fake_jpg("sain"))
         if extra_files:
             for path, data in extra_files.items():
                 zf.writestr(path, data)
     return buf.getvalue()
 
 
+def fake_jpg(label):
+    return b"\xff\xd8\xff\xe0" + label.encode() + b"\x00" * 100
+
+
 def make_upload_file(data, name="dataset.zip"):
     return SimpleUploadedFile(name, data, content_type="application/zip")
+
+
+class _FakeAdapter:
+    """Stands in for the domain adapter: keeps the label marker of the fake image."""
+
+    def preprocess(self, image_bytes):
+        img = PILImage.new("RGB", (4, 4))
+        img.info["label"] = "malade" if b"malade" in image_bytes else "sain"
+        return img
+
+
+@pytest.fixture(autouse=True)
+def fake_ml(monkeypatch):
+    """Replace HuggingFace inference: the ETL labels each image with the model output."""
+    import ml.adapters
+    import ml.registry
+
+    monkeypatch.setattr(ml.adapters, "get_adapter", lambda maladie: _FakeAdapter())
+    monkeypatch.setattr(
+        ml.registry, "predict",
+        lambda maladie, img: {"label": img.info["label"], "confidence": 0.9, "raw_label": ""},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -138,10 +164,11 @@ class TestValidateAndExtractZip:
             prof=prof, maladie="Test", fichier_zip=make_upload_file(b"placeholder")
         )
 
-    def test_valid_zip_returns_image_records(self, prof):
+    def test_valid_zip_returns_raw_images(self, prof):
         records = validate_and_extract_zip(self._ds(prof), make_zip())
         assert len(records) == 10  # 5 malade + 5 sain
-        assert {r.label for r in records} == {"malade", "sain"}
+        assert {r.filename for r in records} == {f"img_{i}.jpg" for i in range(5)}
+        assert all(r.data for r in records)
 
     def test_small_zip_accepted(self, prof):
         records = validate_and_extract_zip(self._ds(prof), make_zip(malade_count=1, sain_count=1))
@@ -158,12 +185,15 @@ class TestValidateAndExtractZip:
     def test_macos_metadata_skipped(self, prof):
         extra = {"__MACOSX/malade/._img.jpg": b"meta"}
         records = validate_and_extract_zip(self._ds(prof), make_zip(extra_files=extra))
-        assert all("__MACOSX" not in r.chemin for r in records)
+        assert len(records) == 10
+        assert not any(r.filename.startswith(".") for r in records)
 
-    def test_root_level_files_ignored(self, prof):
-        extra = {"stray.jpg": b"\xff\xd8\xff"}
+    def test_images_accepted_at_any_depth(self, prof):
+        # Folder structure is irrelevant: labels come from ML inference.
+        extra = {"stray.jpg": b"\xff\xd8\xff", "a/b/c/deep.png": b"\x89PNG"}
         records = validate_and_extract_zip(self._ds(prof), make_zip(extra_files=extra))
-        assert not any(r.chemin.endswith("stray.jpg") for r in records)
+        assert len(records) == 12
+        assert {"stray.jpg", "deep.png"} <= {r.filename for r in records}
 
     def test_png_files_accepted(self, prof):
         buf = io.BytesIO()
@@ -227,6 +257,13 @@ class TestProcessDatasetZipTask:
         dataset.refresh_from_db()
         assert dataset.statut == Dataset.Statut.ERROR
         assert "not a valid zip" in dataset.error_message
+
+    def test_image_paths_follow_ml_label(self, prof):
+        from tasks.training_tasks import process_dataset_zip
+        dataset = self._ds(prof)
+        process_dataset_zip.delay(dataset.id)
+        for img in Image.objects.filter(dataset=dataset):
+            assert img.chemin.startswith(f"datasets/{dataset.id}/images/{img.label}/")
 
     def test_missing_dataset_id_does_not_raise(self):
         from tasks.training_tasks import process_dataset_zip

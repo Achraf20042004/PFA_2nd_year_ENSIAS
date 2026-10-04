@@ -10,7 +10,7 @@ Endpoint summary:
 import logging
 
 from rest_framework import permissions, serializers
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView

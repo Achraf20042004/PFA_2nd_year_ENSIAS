@@ -6,7 +6,6 @@ All queries that touch the 'analytics' SQLite database explicitly use
 Cross-database joins are avoided — data is merged in Python.
 """
 import logging
-from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +287,6 @@ def get_admin_dashboard() -> dict:
     """
     from django.contrib.auth import get_user_model
     from django.db.models import Avg, Count
-    from django.utils import timezone
 
     from apps.analytics.models import ETLLog
     from apps.datasets.models import Dataset
@@ -299,10 +297,10 @@ def get_admin_dashboard() -> dict:
 
     # ---- User counts (PostgreSQL) ----------------------------------------
     role_counts = dict(User.objects.values_list("role").annotate(n=Count("id")))
-    total_admins   = role_counts.get("admin", 0)
-    total_profs    = role_counts.get("prof", 0)
+    total_admins = role_counts.get("admin", 0)
+    total_profs = role_counts.get("prof", 0)
     total_students = role_counts.get("etudiant", 0)
-    total_users    = total_admins + total_profs + total_students
+    total_users = total_admins + total_profs + total_students
 
     # ---- Global attempt stats (PostgreSQL) --------------------------------
     total_attempts = Attempt.objects.count()
@@ -310,10 +308,10 @@ def get_admin_dashboard() -> dict:
     avg_score = round(global_avg_raw * 100, 1) if global_avg_raw is not None else None
 
     # ---- ETL health (SQLite) — total, success, error counts ---------------
-    etl_qs      = ETLLog.objects.using("analytics")
-    etl_total   = etl_qs.count()
+    etl_qs = ETLLog.objects.using("analytics")
+    etl_total = etl_qs.count()
     etl_success = etl_qs.filter(status="success").count()
-    etl_error   = etl_qs.filter(status="error").count()
+    etl_error = etl_qs.filter(status="error").count()
 
     # ---- Recent ETL logs (last 10, with maladie resolved via dataset_id) --
     recent_raw = list(

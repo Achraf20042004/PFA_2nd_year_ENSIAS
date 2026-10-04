@@ -9,6 +9,7 @@ Coverage:
 - validate_and_extract_zip service: unit tests for each failure mode
 """
 import io
+import re
 import zipfile
 
 import pytest
@@ -258,12 +259,15 @@ class TestProcessDatasetZipTask:
         assert dataset.statut == Dataset.Statut.ERROR
         assert "not a valid zip" in dataset.error_message
 
-    def test_image_paths_follow_ml_label(self, prof):
+    def test_image_paths_do_not_reveal_label(self, prof):
         from tasks.training_tasks import process_dataset_zip
         dataset = self._ds(prof)
         process_dataset_zip.delay(dataset.id)
-        for img in Image.objects.filter(dataset=dataset):
-            assert img.chemin.startswith(f"datasets/{dataset.id}/images/{img.label}/")
+        paths = [img.chemin for img in Image.objects.filter(dataset=dataset)]
+        assert len(set(paths)) == 10
+        for chemin in paths:
+            assert re.fullmatch(rf"datasets/{dataset.id}/images/[0-9a-f]{{32}}\.jpg", chemin)
+            assert "malade" not in chemin and "sain" not in chemin and "img_" not in chemin
 
     def test_missing_dataset_id_does_not_raise(self):
         from tasks.training_tasks import process_dataset_zip

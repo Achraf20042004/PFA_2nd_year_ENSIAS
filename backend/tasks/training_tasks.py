@@ -37,8 +37,9 @@ def process_dataset_zip(self, dataset_id: int):
       1. Mark dataset as PROCESSING.
       2. Read zip from storage, validate structure and file types.
       3. Smoke-test the domain adapter on a sample image (in-memory).
-      4. Upload original images to MinIO: datasets/{id}/images/{label}/{file}
-         Upload preprocessed images to MinIO: datasets/{id}/preprocessed/{file}
+      4. Upload original images to MinIO: datasets/{id}/images/{random}{ext}
+         Upload preprocessed images to MinIO: datasets/{id}/preprocessed/{random}{ext}
+         Random names: the public URL must not reveal the label (path or filename).
          Create Image records with the saved MinIO paths.
       5. Mark dataset as READY (or ERROR on failure).
       6. Log each ETL step to the analytics SQLite database.
@@ -221,8 +222,10 @@ def process_dataset_zip(self, dataset_id: int):
                 logger.warning("ML inference failed for %s — skipping: %s", filename, exc)
                 continue
 
-            # 2. Upload original image
-            orig_key = f"datasets/{dataset_id}/images/{label}/{filename}"
+            # 2. Upload original image under a random name so the public URL
+            #    does not reveal the answer to students
+            stored_name = f"{uuid.uuid4().hex}{ext}"
+            orig_key = f"datasets/{dataset_id}/images/{stored_name}"
             try:
                 if use_minio:
                     s3.upload_fileobj(
@@ -244,7 +247,7 @@ def process_dataset_zip(self, dataset_id: int):
                 fmt = "JPEG" if ext in (".jpg", ".jpeg") else "PNG"
                 pil_img.save(buf, format=fmt)
                 buf.seek(0)
-                pre_key = f"datasets/{dataset_id}/preprocessed/{filename}"
+                pre_key = f"datasets/{dataset_id}/preprocessed/{stored_name}"
                 if use_minio:
                     s3.upload_fileobj(
                         buf,

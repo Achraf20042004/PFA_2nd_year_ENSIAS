@@ -1,9 +1,19 @@
 # MedTrain AI
 
-[![CI](https://github.com/Aymane7236/medtrain/actions/workflows/ci.yml/badge.svg)](https://github.com/Aymane7236/medtrain/actions/workflows/ci.yml)
+[![CI](https://github.com/Achraf20042004/PFA_2nd_year_ENSIAS/actions/workflows/ci.yml/badge.svg)](https://github.com/Achraf20042004/PFA_2nd_year_ENSIAS/actions/workflows/ci.yml)
 
 A medical education platform where professors create image-based diagnostic exercises
-and students practice diagnosing medical images with AI feedback.
+and students practice diagnosing medical images (chest X-rays, skin lesions, brain MRIs)
+with AI feedback: model prediction, confidence score and Grad-CAM heatmaps.
+
+> Second-year end-of-year project (PFA) at ENSIAS, built as a team.
+
+## Team
+
+| Member | GitHub |
+|---|---|
+| Achraf Zbakh | [@Achraf20042004](https://github.com/Achraf20042004) |
+| Mohamed Aymane Eddaoudi | [@Aymane7236](https://github.com/Aymane7236) |
 
 ---
 
@@ -11,14 +21,14 @@ and students practice diagnosing medical images with AI feedback.
 
 | Layer | Tech |
 |---|---|
-| Backend | Django 6 + Django REST Framework |
-| Database | PostgreSQL 16 |
+| Backend | Django 6 + Django REST Framework, Django Channels (WebSocket) |
+| Databases | PostgreSQL 16 (transactional) + SQLite (analytics) |
 | Task queue | Celery + Redis |
 | File storage | MinIO (dev) / AWS S3 (prod) |
-| AI pipeline | PyTorch + EfficientNet-B0 (Phase 2) |
+| AI pipeline | PyTorch + HuggingFace ViT models, Grad-CAM |
 | Auth | JWT + OAuth2 (Google / Microsoft) |
-| Frontend | React (Phase 2) |
-| Mobile | Kotlin / Android (Phase 2) |
+| Frontend | React 19 + Vite + Tailwind CSS |
+| CI/CD | GitHub Actions (flake8, pytest on Postgres, Docker image to GHCR) |
 
 ## Quick start (Docker)
 
@@ -46,11 +56,10 @@ python -m pytest apps/ -q
 ## Project structure
 
 ```
-medtrain/
-├── backend/          Django app (apps/, config/, ml/, tasks/)
-├── frontend/         React app (Phase 2)
-├── mobile/           Kotlin Android app (Phase 2)
-├── docs/             Architecture & API docs
+.
+├── backend/          Django project (apps/, config/, ml/, tasks/)
+├── frontend/         React app (student, professor and admin interfaces)
+├── locustfile.py     Load tests
 ├── docker-compose.yml
 └── docker-compose.override.yml  (dev overrides)
 ```
